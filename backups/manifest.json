@@ -1,0 +1,22 @@
+[
+  {
+    "filename": "pizza_20260718T192658Z.db",
+    "path": "C:\\Users\\parth\\.gemini\\antigravity-ide\\scratch\\telegram-pizza-app\\backups\\pizza_20260718T192658Z.db",
+    "created_at": "20260718T192658Z",
+    "source": "C:\\Users\\parth\\.gemini\\antigravity-ide\\scratch\\telegram-pizza-app\\data\\pizza.db",
+    "size_bytes": 1261568,
+    "sha256": "4e5e61155f8d4426a81f89d494b9b30a2584ffd709bcff7d8ca6b7a435e405d9",
+    "verified": true,
+    "verified_at": "2026-07-18T19:26:58.065113"
+  },
+  {
+    "filename": "pizza_20260718T192804Z.db",
+    "path": "C:\\Users\\parth\\.gemini\\antigravity-ide\\scratch\\telegram-pizza-app\\backups\\pizza_20260718T192804Z.db",
+    "created_at": "20260718T192804Z",
+    "source": "C:\\Users\\parth\\.gemini\\antigravity-ide\\scratch\\telegram-pizza-app\\data\\pizza.db",
+    "size_bytes": 1261568,
+    "sha256": "4e5e61155f8d4426a81f89d494b9b30a2584ffd709bcff7d8ca6b7a435e405d9",
+    "verified": true,
+    "verified_at": "2026-07-18T19:28:04.167475"
+  }
+]
