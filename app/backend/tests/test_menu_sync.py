@@ -35,28 +35,25 @@ async def test_sync_realtime_menu_upsert(db_session, monkeypatch):
         return 19.0760, 72.8777
     monkeypatch.setattr("app.backend.services.dominos_scraper.geocode_address", mock_geocode)
 
-    # Mock DominosBrowser.find_nearest_store and fetch_menu
-    class MockBrowser:
-        async def find_nearest_store(self, lat, lon, db=None):
-            return {"store_id": "1234"}
-        async def fetch_menu(self, store_id, page=1, limit=150, db=None):
-            return [
-                {
-                    "name": "Margherita Classic Pizza",
-                    "price": 250.0,
-                    "description": "Cheese & Tomato",
-                    "is_veg": True,
-                    "crust_options": ["New Hand Tossed"],
-                    "size_options": ["Regular", "Medium"]
-                },
-                {
-                    "name": "Pepsi 500ml",
-                    "price": 60.0,
-                    "is_veg": True
-                }
-            ]
+    # Mock get_menu_for_city
+    async def mock_get_menu(city):
+        return [
+            {
+                "name": "Margherita Classic Pizza",
+                "price": 250.0,
+                "description": "Cheese & Tomato",
+                "is_veg": True,
+                "crust_options": ["New Hand Tossed"],
+                "size_options": ["Regular", "Medium"]
+            },
+            {
+                "name": "Pepsi 500ml",
+                "price": 60.0,
+                "is_veg": True
+            }
+        ]
     
-    monkeypatch.setattr("app.backend.services.dominos_browser.DominosBrowser", MockBrowser)
+    monkeypatch.setattr("app.backend.services.dominos_scraper.get_menu_for_city", mock_get_menu)
 
     # Add pre-existing product to test update logic
     p1 = Product(name="Margherita Classic Pizza", original_price=200.0, category="Veg", availability=True)

@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     OTP_WAIT_TIMEOUT: int = Field(180, ge=30, description="Timeout waiting for OTP page readiness (seconds).")
     PAGE_RECOVERY_RETRIES: int = Field(3, ge=0, description="Number of retries for recovering a dead page.")
     AUTO_ASSIGN_SESSIONS: bool = Field(True, description="Enable automatic fallback to any active verified session for placing orders.")
+    MOCK_ORDER_PLACEMENT: bool = Field(False, description="Enable simulated/mock order placement instead of invoking live Playwright browser syncer.")
 
     # --- Logging / observability ---
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
@@ -135,11 +136,11 @@ class Settings(BaseSettings):
                 secret: SecretStr = getattr(self, attr)
                 if secret.get_secret_value() == default and self.ENV == "production":
                     raise ValueError(
-                        f"{attr} must be overridden in production – do not use the default value."
+                        f"{attr} must be overridden in production - do not use the default value."
                     )
                 elif secret.get_secret_value() == default:
                     warnings.warn(
-                        f"{attr} is still using the default value – override before going to production.",
+                        f"{attr} is still using the default value - override before going to production.",
                         stacklevel=2,
                     )
             return self
@@ -172,11 +173,11 @@ class Settings(BaseSettings):
                 val = secret.get_secret_value() if hasattr(secret, "get_secret_value") else (secret or "")
                 if val == default and env == "production":
                     raise ValueError(
-                        f"{attr} must be overridden in production – do not use the default value."
+                        f"{attr} must be overridden in production - do not use the default value."
                     )
                 elif val == default:
                     warnings.warn(
-                        f"{attr} is still using the default value – override before going to production.",
+                        f"{attr} is still using the default value - override before going to production.",
                         stacklevel=2,
                     )
             return values

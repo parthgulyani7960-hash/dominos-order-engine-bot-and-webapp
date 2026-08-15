@@ -62,7 +62,6 @@ from . import routes, bot
 from .bot import run_bot_polling
 from .utils import run_backup
 from .services import notification_service
-from .services.browser_pool import browser_pool
 
 
 @contextlib.asynccontextmanager
@@ -85,12 +84,6 @@ async def lifespan(app: FastAPI):
         if not task.done():
             task.cancel()
     await asyncio.gather(*_bg_tasks, return_exceptions=True)
-
-    logger.info("[Shutdown] Closing browser pool...")
-    try:
-        await browser_pool.close_all()
-    except Exception as exc:
-        logger.warning(f"[Shutdown] browser_pool.close_all error: {exc}")
 
     logger.info("[Shutdown] Closing HTTP client...")
     try:
@@ -673,10 +666,6 @@ app.include_router(api_router, prefix="/api")
 
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
 UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads"))
-os.makedirs(os.path.join(FRONTEND_DIR, "mini-app"), exist_ok=True)
-os.makedirs(os.path.join(FRONTEND_DIR, "admin"), exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
-app.mount("/admin", StaticFiles(directory=os.path.join(FRONTEND_DIR, "admin"), html=True), name="admin")
-app.mount("/", StaticFiles(directory=os.path.join(FRONTEND_DIR, "mini-app"), html=True), name="mini-app")

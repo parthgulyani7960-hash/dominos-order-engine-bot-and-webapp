@@ -3,6 +3,8 @@ Domino's Site Integration & Proxy Rotation Service
 Simulates and handles order dispatch requests to Domino's India portal (m.dominos.co.in).
 """
 import os
+import logging
+logger = logging.getLogger(__name__)
 import random
 import datetime
 import traceback
@@ -105,74 +107,9 @@ async def submit_dominos_order(order: Order, db: Session) -> dict:
             "proxy_used": "Mocked Proxy"
         }
         
-    # Live mode: use Playwright order syncer
-    try:
-        from .order_sync import OrderSyncer
-        order_syncer = OrderSyncer(db)
-        sync_res = await order_syncer.place_order(order)
-        if not sync_res["success"]:
-            raise Exception(sync_res["message"])
-            
-        import random
-        order.dominos_reference = sync_res.get("dominos_reference") or f"DOM-REF-{random.randint(100000, 999999)}"
-        
-        # Transition status to Preparing
-        from ..database import OrderStatusHistory
-        order.status = "Preparing"
-        h = OrderStatusHistory(order_id=order.id, status="Preparing")
-        db.add(h)
-        db.commit()
-        
-        # Broadcast SSE update
-        try:
-            from .notification_service import sse_broadcast_func
-            if sse_broadcast_func:
-                await sse_broadcast_func({"type": "order_update", "order_id": order.id, "status": "Preparing"})
-        except Exception:
-            pass
-            
-        # Send confirmation screenshot and details to the user via Telegram Bot
-        try:
-            user = order.user
-            if user and user.telegram_id:
-                # Find the screenshot file path
-                screenshot_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "static", "screenshots")
-                screenshot_path = os.path.join(screenshot_dir, f"order_{order.id}.png")
-                
-                # Format a rich message with Domino's Reference ID
-                caption = (
-                    f"🎉 <b>Order Placed on Domino's!</b>\n\n"
-                    f"📦 <b>Order ID:</b> <code>{order.id}</code>\n"
-                    f"🍕 <b>Domino's Order Number:</b> <code>{order.dominos_reference}</code>\n"
-                    f"📍 <b>Delivery Address:</b> {order.address}\n\n"
-                    f"👨‍🍳 <i>Your pizza has been successfully ordered and is now being prepared! Screenshot proof attached.</i>"
-                )
-                
-                # Send photo or fallback to message if screenshot file doesn't exist
-                from .notification_service import send_bot_photo_func, send_bot_message_func
-                if os.path.exists(screenshot_path) and send_bot_photo_func:
-                    await send_bot_photo_func(user.telegram_id, screenshot_path, caption=caption)
-                elif send_bot_message_func:
-                    await send_bot_message_func(user.telegram_id, caption)
-        except Exception as notify_err:
-            logger.error(f"Failed to notify user of placed order: {notify_err}")
-
-        return {
-            "success": True,
-            "reference": order.dominos_reference,
-            "proxy_used": os.getenv("STATIC_PROXY", "None")
-        }
-    except Exception as e:
-        import traceback
-        from ..database import ErrorLog
-        err_msg = f"Domino's submission failed: {str(e)}"
-        err = ErrorLog(
-            type="integration",
-            message=err_msg,
-            stack_trace=traceback.format_exc()
-        )
-        db.add(err)
-        raise Exception(err_msg)
+    # Manual mode: all orders placed manually by admin
+    logger.info(f"[Manual Mode] submit_dominos_order called for order {order.id} (no-op).")
+    return {"success": True, "message": "Manual mode active"}
 
 def get_menu(city: str) -> List[Dict]:
     """Fetch Domino's menu for a city using the scraper.
@@ -192,8 +129,7 @@ async def sync_realtime_menu(location_input: str, db: Session, lat: float = None
     and syncs/upserts the items and store pricing into the Product database table.
     """
     try:
-        from .dominos_scraper import geocode_address
-        from .dominos_browser import DominosBrowser
+        from .dominos_scraper import geocode_address, get_menu_for_city
         from ..database import Product
         import json
         
@@ -201,15 +137,8 @@ async def sync_realtime_menu(location_input: str, db: Session, lat: float = None
         if lat is None or lon is None:
             lat, lon = await geocode_address(location_input or "Delhi")
         
-        # 2. Find nearest Domino's store using exact coordinates
-        browser = DominosBrowser()
-        store = await browser.find_nearest_store(lat, lon, db)
-        store_id = store.get("store_id")
-        if not store_id:
-            return
-            
-        # 3. Fetch menu directly for this specific store (uses 1-hour cache internally)
-        menu_items = await browser.fetch_menu(store_id, page=1, limit=150, db=db)
+        # 3. Fetch menu directly
+        menu_items = await get_menu_for_city(location_input or "Delhi")
         if not menu_items:
             return
             

@@ -1,5 +1,5 @@
 {
-  "timestamp": 1786171457.46768,
+  "timestamp": 1786217217.817051,
   "items": [
     {
       "dominos_id": "cheese-lava-golden-corn",
@@ -648,10 +648,10 @@
       ]
     },
     {
-      "dominos_id": "cheese-burst-veggie-paradise-xtravaganza-meal",
-      "name": "Cheese Burst Veggie Paradise: Xtravaganza Meal",
-      "price": 350,
-      "description": "Reg. Cheese Burst  Veggie Paradise, Choco Lava Cake, Paneer Tandoori Meltz, Crispy Veggie Bites (3pcs), Carbonated Beverage (Beverage variant subject to availability).",
+      "dominos_id": "paneer-cheese-bowl-cano",
+      "name": "Paneer Cheese Bowl-Cano",
+      "price": 179,
+      "description": "Cheese Bowl-Cano with Paneer Tikka topping.",
       "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
       "available": true,
       "is_veg": true,
@@ -667,29 +667,29 @@
       ]
     },
     {
-      "dominos_id": "classic-veggie-paradise-xtravaganza-meal",
-      "name": "Classic Veggie Paradise: Xtravaganza Meal",
-      "price": 299,
-      "description": "Reg. Veggie Paradise, Choco Lava Cake, Paneer Tandoori Meltz, Crispy Veggie Bites (3pcs), Carbonated Beverage (Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "5-course-meal-pepper-bbq-pizza",
-      "name": "5 Course Meal: Pepper BBQ Pizza",
+      "dominos_id": "classic-cheese-bowl-cano",
+      "name": "Classic Cheese Bowl-Cano",
       "price": 149,
-      "description": "Pizza Mania Pepper Barbecue Chicken + Creamy Tomato Meltz + Crispy Veggie Bites + Choco Bomb + Carbonated Beverage (Beverage variant subject to availability).",
+      "description": "A freshly baked bowl, generously filled with rich molten cheese and topped with basil-parsley seasoning.",
+      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
+      "available": true,
+      "is_veg": true,
+      "crust_options": [
+        "New Hand Tossed",
+        "Cheese Burst",
+        "Fresh Pan"
+      ],
+      "size_options": [
+        "Regular",
+        "Medium",
+        "Large"
+      ]
+    },
+    {
+      "dominos_id": "chicken-cheese-bowl-cano",
+      "name": "Chicken Cheese Bowl-Cano",
+      "price": 179,
+      "description": "Cheese Bowl-Cano with Chicken Keema topping.",
       "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
       "available": true,
       "is_veg": false,
@@ -705,257 +705,10 @@
       ]
     },
     {
-      "dominos_id": "5-course-meal-golden-corn-pizza",
-      "name": "5 Course Meal: Golden Corn Pizza",
-      "price": 149,
-      "description": "Pizza Mania Golden Corn + Creamy Tomato Meltz + Crispy Veggie Bites + Choco Bomb + Carbonated Beverage (Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "5-course-meal-veg-loaded-pizza",
-      "name": "5 Course Meal: Veg Loaded Pizza",
-      "price": 201,
-      "description": "Pizza Mania Veg Loaded + Creamy Tomato Meltz + Crispy Veggie Bites + Choco Bomb + Carbonated Beverage (Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "5-course-meal-sausage-pizza",
-      "name": "5 Course Meal: Sausage Pizza",
-      "price": 149,
-      "description": "Pizza Mania Chicken Sausage + Creamy Tomato Meltz + Crispy Veggie Bites + Choco Bomb + Carbonated Beverage (Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "cheese-volcano-pepper-bbq-chicken-xtravaganza-meal-for-2",
-      "name": "Cheese Volcano Pepper BBQ Chicken: Xtravaganza Meal for 2",
-      "price": 499,
-      "description": "Reg+ Cheese Volcano  Pepper BBQ Chicken, Choco Lava Cake (2pcs), Chicken Tandoori Meltz, Crispy Veggie Bites (4pcs), Carbonated Beverage (2pcs - Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "5-course-meal-non-veg-loaded-pizza",
-      "name": "5 Course Meal: Non Veg Loaded Pizza",
-      "price": 201,
-      "description": "Pizza Mania Non Veg Loaded + Creamy Tomato Meltz + Chicken Popcorn + Choco Bomb + Carbonated Beverage (Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "5-course-meal-onion-pizza",
-      "name": "5 Course Meal: Onion Pizza",
-      "price": 149,
-      "description": "Pizza Mania Onion + Creamy Tomato Meltz + Crispy Veggie Bites + Choco Bomb + Carbonated Beverage (Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "cheese-volcano-veggie-paradise-xtravaganza-meal-for-2",
-      "name": "Cheese Volcano Veggie Paradise: Xtravaganza Meal for 2",
-      "price": 499,
-      "description": "Reg+ Cheese Volcano  Veggie Paradise, Choco Lava Cake (2pcs), Paneer Tandoori Meltz, Crispy Veggie Bites (4pcs), Carbonated Beverage (2pcs - Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "5-course-meal-classic-pizza",
-      "name": "5 Course Meal: Classic Pizza",
-      "price": 149,
-      "description": "Pizza Mania Classic + Creamy Tomato Meltz + Crispy Veggie Bites + Choco Bomb + Carbonated Beverage (Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "tandoori-chicken-burst-xtravaganza-meal",
-      "name": "Tandoori Chicken Burst: Xtravaganza Meal",
-      "price": 349,
-      "description": "Reg. Tandoori Chicken Burst, Choco Lava Cake, Chicken Tandoori Meltz, Crispy Veggie Bites (3pcs), Carbonated Beverage (Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "cheese-burst-peppy-paneer-xtravaganza-meal",
-      "name": "Cheese Burst Peppy Paneer: Xtravaganza Meal",
-      "price": 350,
-      "description": "Reg. Cheese Burst Peppey Paneer, Choco Lava Cake, Paneer Tandoori Meltz, Crispy Veggie Bites (3pcs), Carbonated Beverage (Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "cheese-volcano-peppy-paneer-xtravaganza-meal-for-2",
-      "name": "Cheese Volcano Peppy Paneer: Xtravaganza Meal for 2",
-      "price": 499,
-      "description": "Reg+ Cheese Volcano Peppey Paneer, Choco Lava Cake (2pcs), Paneer Tandoori Meltz, Crispy Veggie Bites (4pcs), Carbonated Beverage (2pcs - Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "cheese-burst-pepper-bbq-chicken-xtravaganza-meal",
-      "name": "Cheese Burst Pepper BBQ Chicken: Xtravaganza Meal",
-      "price": 350,
-      "description": "Reg. Cheese Burst  Pepper BBQ Chicken, Choco Lava Cake, Chicken Tandoori Meltz, Crispy Veggie Bites (3pcs), Carbonated Beverage (Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "classic-peppy-paneer-xtravaganza-meal",
-      "name": "Classic Peppy Paneer: Xtravaganza Meal",
-      "price": 299,
-      "description": "Reg. Peppey Paneer, Choco Lava Cake, Paneer Tandoori Meltz, Crispy Veggie Bites (3pcs), Carbonated Beverage (Beverage variant subject to availability).",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "classic-pepper-bbq-chicken-xtravaganza-meal",
-      "name": "Classic Pepper BBQ Chicken: Xtravaganza Meal",
-      "price": 299,
-      "description": "Reg. Pepper BBQ Chicken, Choco Lava Cake, Chicken Tandoori Meltz, Crispy Veggie Bites (3pcs), Carbonated Beverage (Beverage variant subject to availability).",
+      "dominos_id": "chicken-pops-cheese-bowl-cano-combo",
+      "name": "Chicken Pops Cheese Bowl-Cano Combo",
+      "price": 298,
+      "description": "Chicken Cheese Bowl-Cano, Chicken Pops, Carbonated Beverage (Beverage variant subject to availability).",
       "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
       "available": true,
       "is_veg": false,
@@ -1750,63 +1503,6 @@
       ]
     },
     {
-      "dominos_id": "choco-mousse",
-      "name": "Choco Mousse",
-      "price": 59,
-      "description": "A rich, velvety chocolate flavoured mousse that melts in your mouth. Pure indulgence in every spoon!.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "butterscotch-mousse",
-      "name": "Butterscotch Mousse",
-      "price": 59,
-      "description": "A smooth, airy butterscotch flavoured mousse. Sweet, creamy, and irresistibly comforting!.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "blueberry-mousse",
-      "name": "Blueberry Mousse",
-      "price": 59,
-      "description": "A light, creamy blueberry mousse bursting with fruity freshness. A perfectly smooth finish!.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
       "dominos_id": "big-big-6in1-pizza-non-veg",
       "name": "Big Big 6in1 Pizza - Non Veg",
       "price": 999,
@@ -1845,181 +1541,10 @@
       ]
     },
     {
-      "dominos_id": "grilled-wings-signature-garlic",
-      "name": "Grilled Wings Signature Garlic",
-      "price": 169,
-      "description": "Juicy grilled chicken wings roasted with bold garlic flavors for a delicious taste!.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
       "dominos_id": "grilled-wings-lemon-pepper",
       "name": "Grilled Wings Lemon Pepper",
       "price": 169,
       "description": "Juicy grilled chicken wings roasted with zesty lemon pepper seasoning for a delicious taste!.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "juicy-boneless-chicken",
-      "name": "Juicy Boneless Chicken",
-      "price": 149,
-      "description": "Crispy, juicy boneless thighs seasoned with flavourful chili for a spicy kick. Crunchy outside, juicy inside!.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "grilled-wings-southern-spice",
-      "name": "Grilled wings Southern Spice",
-      "price": 169,
-      "description": "Juicy grilled chicken wings roasted with rich Southern spices for a delicious flavor!.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "chicken-platter-for-2-peri-peri-dip",
-      "name": "Chicken Platter for 2-Peri Peri Dip",
-      "price": 399,
-      "description": "Combo of Spicy Chicken Pops, Juicy Boneless Chicken, Spicy Chicken Bomb , Chicken parcel with Peri Peri Dip.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "chicken-platter-for-2-cream-onion-dip",
-      "name": "Chicken Platter for 2-Cream & Onion Dip",
-      "price": 399,
-      "description": "Combo of Spicy Chicken Pops, Juicy Boneless Chicken, Spicy Chicken Bomb , Chicken parcel with Cream and Onion Dip.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "chicken-platter-for-4-peri-peri-dip",
-      "name": "Chicken Platter for 4-Peri Peri Dip",
-      "price": 649,
-      "description": "Combo of Grilled Wings, Spicy Chicken Pops, Juicy Boneless Chicken, Spicy Chicken Bomb , Chicken parcel with Peri Peri Dip.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "chicken-platter-for-4-cream-onion-dip",
-      "name": "Chicken Platter for 4-Cream & Onion Dip",
-      "price": 649,
-      "description": "Combo of Grilled Wings, Spicy Chicken Pops, Juicy Boneless Chicken, Spicy Chicken Bomb , Chicken parcel with Cream and Onion Dip.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "saucy-boneless-chicken-peri-peri",
-      "name": "Saucy Boneless Chicken - Peri Peri",
-      "price": 180,
-      "description": "Indulge in juicy boneless chicken with  fiery peri peri dip.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "saucy-boneless-chicken-cream-onion",
-      "name": "Saucy Boneless Chicken - Cream & Onion",
-      "price": 180,
-      "description": "Indulge in juicy boneless chicken with creamy onion dip.",
       "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
       "available": true,
       "is_veg": false,
@@ -2992,25 +2517,6 @@
       "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
       "available": true,
       "is_veg": false,
-      "crust_options": [
-        "New Hand Tossed",
-        "Cheese Burst",
-        "Fresh Pan"
-      ],
-      "size_options": [
-        "Regular",
-        "Medium",
-        "Large"
-      ]
-    },
-    {
-      "dominos_id": "cream-and-onion-dip",
-      "name": "Cream and Onion Dip",
-      "price": 39,
-      "description": "A rich and creamy dip with a delicious blend of onion and spices, inspired by international flavors!.",
-      "image_url": "https://cdn.jflimages.co.in/prod-olo-api/contents/home-cms/KgN9T02tglCSyPEjQY5NG3z19UTggJ1YnJB5oNkj.png",
-      "available": true,
-      "is_veg": true,
       "crust_options": [
         "New Hand Tossed",
         "Cheese Burst",

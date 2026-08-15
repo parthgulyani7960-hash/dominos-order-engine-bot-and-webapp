@@ -107,6 +107,7 @@ class User(TimestampMixin, Base):
     bot_cart       = Column(Text, nullable=True)
     telegram_verification_code = Column(String, nullable=True)
     telegram_verified = Column(Boolean, default=False, nullable=False)
+    admin_expires_at = Column(DateTime, nullable=True)
     version        = Column(Integer, default=0, nullable=False)  # optimistic locking
 
     sessions        = relationship("UserSession",  back_populates="user", cascade="all, delete-orphan")
@@ -527,6 +528,20 @@ class WalletTransaction(TimestampMixin, Base):
     user = relationship("User", backref="wallet_transactions")
 
 
+class WithdrawalRequest(TimestampMixin, Base):
+    __tablename__ = "withdrawal_requests"
+
+    id           = Column(String(36), primary_key=True, default=_uuid_default)
+    user_id      = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    amount       = Column(Float, nullable=False)
+    upi_id       = Column(String, nullable=False)
+    status       = Column(String, default="Pending", nullable=False)  # Pending | Approved | Rejected
+    admin_note   = Column(Text, nullable=True)
+    processed_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", backref="withdrawal_requests")
+
+
 # ---------------------------------------------------------------------------
 # Database initialization (Alembic-aware)
 # ---------------------------------------------------------------------------
@@ -544,12 +559,14 @@ def init_db() -> None:
     # Ensure newer columns are added if they don't exist (for existing databases)
     from sqlalchemy import text
     with engine.begin() as conn:
-        # User verification columns
+        # User verification & expiry columns
         user_cols = [c["name"] for c in insp.get_columns("users")]
         if "telegram_verification_code" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN telegram_verification_code VARCHAR"))
         if "telegram_verified" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN telegram_verified BOOLEAN DEFAULT 0"))
+        if "admin_expires_at" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN admin_expires_at DATETIME"))
 
         # Order telemetry columns
         order_cols = [c["name"] for c in insp.get_columns("orders")]
@@ -558,21 +575,31 @@ def init_db() -> None:
         if "device_details" not in order_cols:
             conn.execute(text("ALTER TABLE orders ADD COLUMN device_details TEXT"))
 
-        columns = [c["name"] for c in insp.get_columns("dominos_sessions")]
-        if "max_orders_per_day" not in columns:
-            conn.execute(text("ALTER TABLE dominos_sessions ADD COLUMN max_orders_per_day INTEGER DEFAULT 10"))
-        if "today_orders_count" not in columns:
-            conn.execute(text("ALTER TABLE dominos_sessions ADD COLUMN today_orders_count INTEGER DEFAULT 0"))
-        if "last_order_placed_at" not in columns:
-            conn.execute(text("ALTER TABLE dominos_sessions ADD COLUMN last_order_placed_at DATETIME"))
-        if "allowed_stores" not in columns:
-            conn.execute(text("ALTER TABLE dominos_sessions ADD COLUMN allowed_stores TEXT"))
-        if "assigned_admins" not in columns:
-            conn.execute(text("ALTER TABLE dominos_sessions ADD COLUMN assigned_admins TEXT"))
-        if "terms_accepted" not in columns:
-            conn.execute(text("ALTER TABLE dominos_sessions ADD COLUMN terms_accepted BOOLEAN DEFAULT 0"))
-        if "total_orders_placed" not in columns:
-            conn.execute(text("ALTER TABLE dominos_sessions ADD COLUMN total_orders_placed INTEGER DEFAULT 0"))
+        # Create withdrawal_requests table if not exists
+        if not insp.has_table("withdrawal_requests"):
+            conn.execute(text("""
+                CREATE TABLE withdrawal_requests (
+                    id VARCHAR(36) PRIMARY KEY,
+                    user_id VARCHAR(36) NOT NULL,
+                    amount FLOAT NOT NULL,
+                    upi_id VARCHAR NOT NULL,
+                    status VARCHAR NOT NULL DEFAULT 'Pending',
+                    admin_note TEXT,
+                    processed_at DATETIME,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
+                )
+            """))
+
+        # Clean up / Drop obsolete tables safely
+        obsolete_tables = ["dominos_sessions", "dominos_otp_requests", "proxies", "proxy_logs", "robot_logs"]
+        for table in obsolete_tables:
+            if insp.has_table(table):
+                try:
+                    conn.execute(text(f"DROP TABLE {table}"))
+                except Exception:
+                    pass
 
 
 # ---------------------------------------------------------------------------

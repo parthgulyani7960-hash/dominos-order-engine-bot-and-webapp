@@ -72,6 +72,20 @@ async def transition_order_status(
     order.status = new_status
     order.updated_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
+    # Process Refund if status changed to Cancelled or Refunded
+    if new_status in ["Cancelled", "Refunded"] and current_status not in ["Cancelled", "Refunded"]:
+        user = db.query(User).filter(User.id == order.user_id).first()
+        if user:
+            user.wallet_balance += order.total_payable
+            from ..database import WalletTransaction
+            refund_tx = WalletTransaction(
+                user_id=user.id,
+                amount=order.total_payable,
+                type="refund",
+                description=f"Refund for cancelled order #{order.id}"
+            )
+            db.add(refund_tx)
+
     # Set estimated delivery time
     if new_status in STATUS_ETA:
         order.estimated_delivery = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) + datetime.timedelta(

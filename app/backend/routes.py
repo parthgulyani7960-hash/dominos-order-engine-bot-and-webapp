@@ -17,8 +17,6 @@ from .database import get_db, User, UserSession, Product, Order, OrderItem, Orde
 import logging
 logger = logging.getLogger(__name__)
 from .services import dominos_service
-from .services.dominos_browser import DominosBrowser
-from .services.order_sync import OrderSyncer
 from .auth import (
     verify_telegram_init_data, create_access_token, create_refresh_token,
     verify_token, hash_password, verify_password, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -75,6 +73,15 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
     
     if user.is_blocked:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is blocked")
+
+    # Check maintenance mode
+    maintenance_cfg = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
+    if maintenance_cfg and maintenance_cfg.value == "true":
+        if user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="System under maintenance. We will be back shortly!"
+            )
         
     return user
 
@@ -90,6 +97,13 @@ def get_current_admin(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     if user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
+    if user.admin_expires_at:
+        now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        if user.admin_expires_at < now_utc:
+            user.role = "user"
+            user.admin_expires_at = None
+            db.commit()
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges have expired")
     return user
 
 async def log_admin_action(db: Session, admin_id: str, username: str, action: str, details: dict, request: Request):
@@ -667,6 +681,11 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
     Submits a cart and processes the order transaction.
     Uses database transactions to guarantee safety.
     """
+    # Concurrency Lock: Lock user row to prevent race conditions (double checkouts / balance bypasses)
+    user = db.query(User).filter(User.id == user.id).with_for_update().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
     if not payload.items:
         raise HTTPException(status_code=400, detail="Cart is empty")
         
@@ -674,13 +693,12 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
     if payload.latitude and payload.longitude:
         user.latitude = payload.latitude
         user.longitude = payload.longitude
-        if not user.city:
-            try:
-                city = await reverse_geocode(payload.latitude, payload.longitude)
-                if city:
-                    user.city = city
-            except Exception:
-                pass
+        try:
+            city = await reverse_geocode(payload.latitude, payload.longitude)
+            if city:
+                user.city = city
+        except Exception:
+            pass
         db.commit()
         
     original_total = 0.0
@@ -1067,21 +1085,55 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
 
 
 async def geocode_address(address: str) -> tuple:
-    """Geocode address string to get (lat, lon) using OpenStreetMap Nominatim."""
+    """Geocode address string to get (lat, lon) using OpenStreetMap Nominatim, with robust fallbacks."""
     import urllib.parse
     import httpx
-    url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(address)}&format=json&limit=1"
+    import re
+    
     headers = {"User-Agent": "DominosOrderEngineApp/2.0"}
+    
+    # Attempt 1: Full Address Search
+    url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(address)}&format=json&limit=1"
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=headers, timeout=8.0)
+            resp = await client.get(url, headers=headers, timeout=2.5)
             if resp.status_code == 200:
                 data = resp.json()
                 if data:
                     return float(data[0]["lat"]), float(data[0]["lon"])
     except Exception as e:
         logger.error(f"Error geocoding address ({address}): {e}")
-    # Return None, None if geocoding fails (prevent fake mock location fallback)
+        
+    # Attempt 2: Fallback to PIN code search if a 6-digit PIN is present
+    pin_match = re.search(r'\b(\d{6})\b', address)
+    if pin_match:
+        pin = pin_match.group(1)
+        url = f"https://nominatim.openstreetmap.org/search?q={pin}&format=json&limit=1"
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, headers=headers, timeout=2.5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data:
+                        return float(data[0]["lat"]), float(data[0]["lon"])
+        except Exception as e:
+            logger.error(f"Error geocoding fallback PIN ({pin}): {e}")
+            
+    # Attempt 3: Fallback to searching for the last words (usually City, State)
+    parts = [p.strip() for p in address.split(",") if p.strip()]
+    if len(parts) > 1:
+        fallback_query = ", ".join(parts[-2:])  # Last two parts (e.g. "Bengaluru, Karnataka")
+        url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(fallback_query)}&format=json&limit=1"
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, headers=headers, timeout=2.5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data:
+                        return float(data[0]["lat"]), float(data[0]["lon"])
+        except Exception as e:
+            logger.error(f"Error geocoding fallback query ({fallback_query}): {e}")
+            
     return None, None
 
 
@@ -2096,6 +2148,8 @@ def get_system_config(db: Session = Depends(get_db), admin: User = Depends(get_c
         "mini_app_url": configs.get("mini_app_url", ""),
         "captcha_api_key": configs.get("captcha_api_key", ""),
         "playwright_headless": configs.get("playwright_headless", "true"),
+        "robot_mode": configs.get("robot_mode", "auto"),
+        "maintenance_mode": configs.get("maintenance_mode", "false"),
         "activity_timeout": int(configs.get("activity_timeout", 30)),
     }
 
@@ -2386,11 +2440,25 @@ def list_addresses(db: Session = Depends(get_db), user: User = Depends(get_curre
 
 
 @router.post("/addresses")
-def save_address(payload: SavedAddressSchema, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def save_address(payload: SavedAddressSchema, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Save a new delivery address."""
+    city = payload.city
+    if not city and payload.latitude and payload.longitude:
+        try:
+            from .bot import reverse_geocode
+            resolved_city = await reverse_geocode(payload.latitude, payload.longitude)
+            if resolved_city:
+                city = resolved_city
+        except Exception:
+            pass
+
     if payload.is_default:
         # Unset all existing defaults
         db.query(SavedAddress).filter(SavedAddress.user_id == user.id).update({"is_default": False})
+        if city:
+            user.city = city
+        user.latitude = payload.latitude
+        user.longitude = payload.longitude
     addr = SavedAddress(
         user_id=user.id,
         label=payload.label,
@@ -2426,6 +2494,9 @@ def set_default_address(address_id: str, db: Session = Depends(get_db), user: Us
     if not addr:
         raise HTTPException(status_code=404, detail="Address not found")
     addr.is_default = True
+    user.city = addr.city
+    user.latitude = addr.latitude
+    user.longitude = addr.longitude
     db.commit()
     return {"status": "updated"}
 
@@ -3018,6 +3089,238 @@ async def update_order_status_v2(
         await sse_broadcast_callback({"type": "order_update", "order_id": order_id, "status": payload.status})
 
     return {"status": "updated", "new_status": payload.status}
+
+
+class CompleteManuallySchema(BaseModel):
+    dominos_reference: Optional[str] = None
+    estimated_delivery_minutes: Optional[int] = None
+    note: Optional[str] = None
+
+class WithdrawRequestSchema(BaseModel):
+    amount: float
+    upi_id: str
+
+class WithdrawalActionSchema(BaseModel):
+    admin_note: Optional[str] = None
+
+@router.post("/admin/orders/{order_id}/complete-manually")
+async def complete_order_manually(
+    order_id: str,
+    payload: CompleteManuallySchema,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin)
+):
+    from .database import Order, OrderStatusHistory, OrderNote
+    from .bot import send_bot_message
+
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # If it is top-up order, complete it
+    if order_id.startswith("TOPUP-"):
+        order.status = "Completed"
+        db.commit()
+        if sse_broadcast_callback:
+            await sse_broadcast_callback({"type": "order_update", "order_id": order.id, "status": "Completed"})
+        return {"status": "success", "message": "Top-up completed manually"}
+
+    # Update order details
+    if payload.dominos_reference:
+        order.dominos_reference = payload.dominos_reference.strip()
+
+    if payload.estimated_delivery_minutes is not None:
+        order.estimated_delivery = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) + datetime.timedelta(minutes=payload.estimated_delivery_minutes)
+
+    order.status = "Completed"
+    order.updated_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+    # Save note if provided
+    if payload.note:
+        note_entry = OrderNote(
+            order_id=order.id,
+            admin_username=admin.username or "admin",
+            note=payload.note.strip()
+        )
+        db.add(note_entry)
+
+    h = OrderStatusHistory(
+        order_id=order.id,
+        status="Completed",
+        note=payload.note or f"Manually completed by admin: {admin.username}"
+    )
+    db.add(h)
+    db.commit()
+
+    # Notify customer via Telegram Bot
+    customer_user = order.user
+    if customer_user:
+        msg_text = (
+            f"🎉 <b>Order Status Update: Completed</b>\n\n"
+            f"Your order <code>{order.id}</code> has been completed/placed successfully by our administrators!\n"
+        )
+        if order.dominos_reference:
+            msg_text += f"🎫 <b>Domino's Ref No:</b> <code>{order.dominos_reference}</code>\n"
+        if payload.note:
+            msg_text += f"💬 <b>Note from Admin:</b> <i>{payload.note}</i>\n"
+        
+        msg_text += f"\n<b>Progress:</b>\n{get_order_progress_bar('Completed')}"
+
+        markup = {
+            "inline_keyboard": [
+                [{"text": "💬 Contact Support", "url": "https://t.me/dominosordersHELP_bot"}]
+            ]
+        }
+        await send_bot_message(customer_user.telegram_id, msg_text, reply_markup=markup)
+
+    # Log administrative audit trail
+    await log_admin_action(
+        db, admin.id, admin.username, "ORDER_COMPLETED_MANUALLY",
+        {"order_id": order.id, "dominos_reference": payload.dominos_reference, "note": payload.note},
+        request
+    )
+
+    if sse_broadcast_callback:
+        await sse_broadcast_callback({"type": "order_update", "order_id": order.id, "status": "Completed"})
+
+    return {"status": "success"}
+
+
+
+
+from fastapi.responses import FileResponse, StreamingResponse
+
+@router.get("/admin/database/backup")
+def download_database_backup(db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
+    import os
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "dominos.db"))
+    if not os.path.exists(db_path):
+        db_path = os.path.abspath("dominos.db")
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=404, detail="Database file not found")
+    return FileResponse(db_path, media_type="application/x-sqlite3", filename="dominos_backup.db")
+
+@router.get("/admin/reports/system-pdf")
+def get_system_audit_pdf(db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
+    from fpdf import FPDF
+    import io
+    import datetime
+    
+    users = db.query(User).all()
+    orders = db.query(Order).order_by(Order.created_at.desc()).all()
+    transactions = db.query(WalletTransaction).order_by(WalletTransaction.created_at.desc()).all()
+    withdrawals = db.query(WithdrawalRequest).order_by(WithdrawalRequest.created_at.desc()).all()
+    
+    class SystemReportPDF(FPDF):
+        def header(self):
+            self.set_fill_color(31, 41, 55)
+            self.rect(0, 0, 210, 25, "F")
+            self.set_y(5)
+            self.set_font("Helvetica", "B", 14)
+            self.set_text_color(255, 255, 255)
+            self.cell(0, 10, "DOMINO'S ORDER ENGINE SYSTEM REPORT", align="C", ln=True)
+            self.ln(5)
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_font("Helvetica", "I", 8)
+            self.set_text_color(128, 128, 128)
+            self.cell(0, 5, f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Page {self.page_no()}", align="C", ln=True)
+
+    pdf = SystemReportPDF()
+    pdf.set_margins(15, 30, 15)
+    
+    # PAGE 1: Overview Dashboard
+    pdf.add_page()
+    pdf.set_y(30)
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(0, 10, "1. Executive Summary & Overview", ln=True)
+    pdf.ln(5)
+    
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, f"Total Registered Users: {len(users)}", ln=True)
+    pdf.cell(0, 6, f"Total Orders Placed: {len(orders)}", ln=True)
+    pdf.cell(0, 6, f"Total Transactions Logged: {len(transactions)}", ln=True)
+    pdf.cell(0, 6, f"Total Withdrawal Requests: {len(withdrawals)}", ln=True)
+    pdf.cell(0, 6, f"Current Total Wallet Holding: INR {sum(u.wallet_balance for u in users):.2f}", ln=True)
+    pdf.ln(10)
+    
+    # PAGE 2: Users Registry
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, "2. User Registry", ln=True)
+    pdf.ln(4)
+    
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_fill_color(230, 230, 230)
+    pdf.cell(40, 7, "User ID / TG ID", 1, 0, "L", True)
+    pdf.cell(50, 7, "Display Name", 1, 0, "L", True)
+    pdf.cell(40, 7, "Phone", 1, 0, "L", True)
+    pdf.cell(30, 7, "Wallet Balance", 1, 0, "R", True)
+    pdf.cell(20, 7, "Role", 1, 1, "C", True)
+    
+    pdf.set_font("Helvetica", "", 8)
+    for u in users[:40]:
+        pdf.cell(40, 6, str(u.telegram_id), 1)
+        pdf.cell(50, 6, str(u.display_name or '—')[:25], 1)
+        pdf.cell(40, 6, str(u.phone or '—'), 1)
+        pdf.cell(30, 6, f"INR {u.wallet_balance:.2f}", 1, 0, "R")
+        pdf.cell(20, 6, str(u.role), 1, 1, "C")
+        
+    # PAGE 3: Order History Ledger
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, "3. Order Placement Ledger (Recent)", ln=True)
+    pdf.ln(4)
+    
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(40, 7, "Order ID", 1, 0, "L", True)
+    pdf.cell(45, 7, "Date / Time", 1, 0, "L", True)
+    pdf.cell(30, 7, "Total Paid", 1, 0, "R", True)
+    pdf.cell(35, 7, "Payment", 1, 0, "L", True)
+    pdf.cell(30, 7, "Status", 1, 1, "C", True)
+    
+    pdf.set_font("Helvetica", "", 8)
+    for o in orders[:40]:
+        pdf.cell(40, 6, str(o.id), 1)
+        pdf.cell(45, 6, str(o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '—'), 1)
+        pdf.cell(30, 6, f"INR {o.total_payable:.2f}", 1, 0, "R")
+        pdf.cell(35, 6, str(o.payment_method), 1)
+        pdf.cell(30, 6, str(o.status), 1, 1, "C")
+        
+    # PAGE 4: Withdrawals Ledger
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, "4. Wallet Withdrawals Log", ln=True)
+    pdf.ln(4)
+    
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(40, 7, "Withdrawal ID", 1, 0, "L", True)
+    pdf.cell(40, 7, "UPI ID", 1, 0, "L", True)
+    pdf.cell(30, 7, "Amount", 1, 0, "R", True)
+    pdf.cell(40, 7, "Date Requested", 1, 0, "L", True)
+    pdf.cell(30, 7, "Status", 1, 1, "C", True)
+    
+    pdf.set_font("Helvetica", "", 8)
+    for w in withdrawals[:40]:
+        pdf.cell(40, 6, str(w.id[:10]), 1)
+        pdf.cell(40, 6, str(w.upi_id)[:20], 1)
+        pdf.cell(30, 6, f"INR {w.amount:.2f}", 1, 0, "R")
+        pdf.cell(40, 6, str(w.created_at.strftime('%Y-%m-%d %H:%M') if w.created_at else '—'), 1)
+        pdf.cell(30, 6, str(w.status), 1, 1, "C")
+
+    pdf_bytes = pdf.output(dest="S")
+    if isinstance(pdf_bytes, str):
+        pdf_bytes = pdf_bytes.encode("latin1")
+    buf = io.BytesIO(pdf_bytes)
+    
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=system_audit_report.pdf"}
+    )
 
 
 # ============================================================
@@ -3992,266 +4295,9 @@ async def save_dominos_session_browser(session_id: str, request: Request, db: Se
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to extract session: {str(e)}")
 
-@router.post("/admin/dominos/sessions/{session_id}/open")
-@router.post("/api/v1/admin/dominos/sessions/{session_id}/open")
-async def open_dominos_session_browser(session_id: str, request: Request, db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
-    session = db.query(DominosSession).filter(DominosSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-        
-    try:
-        import sys, asyncio
-        from playwright.async_api import async_playwright
-        from .services.dominos_session_manager import sanitize_cookies
-        from app.backend import routes as _routes_mod
-        
-        if sys.platform == "win32":
-            try:
-                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-            except Exception:
-                pass
-        
-        # Start dedicated playwright instance for interactive inspection window
-        pw = await async_playwright().start()
-        browser = await pw.chromium.launch(
-            headless=False,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--window-size=1280,900",
-                "--window-position=50,50",
-                "--start-maximized",
-            ]
-        )
-        
-        # Desktop PC environment with real cookies injected
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            locale="en-IN",
-            viewport={"width": 1280, "height": 900}
-        )
-        
-        if session.cookies:
-            await context.add_cookies(sanitize_cookies(session.cookies))
-            
-        # Inject saved LocalStorage variables (tokens, customerId, client settings) via init script
-        # to ensure the PWA React app reads them on initialization rather than booting as a guest
-        if getattr(session, 'local_storage', None):
-            ls_data = session.local_storage
-            if isinstance(ls_data, str):
-                import json as _json
-                ls_data = _json.loads(ls_data)
-            if ls_data:
-                try:
-                    import json
-                    ls_json = json.dumps(ls_data)
-                    await context.add_init_script(f"""
-                        try {{
-                            const lsData = {ls_json};
-                            for (const [k, v] of Object.entries(lsData)) {{
-                                localStorage.setItem(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
-                            }}
-                        }} catch (e) {{}}
-                    """)
-                    logger.info(f"[OPEN BROWSER] Pre-injected {len(ls_data)} localStorage keys via init script")
-                except Exception as lse_init:
-                    logger.error(f"[OPEN BROWSER] Failed to add localStorage init script: {lse_init}")
-            
-        page = await context.new_page()
-        # Navigate directly to logged-in user home / menu screen
-        await page.goto("https://m.dominos.co.in/jfl-discovery-ui/en/pwa/home", wait_until="domcontentloaded", timeout=20000)
-
-        
-        # Keep global reference so browser stays alive until manually closed
-        if not hasattr(_routes_mod, "OPENED_ADMIN_BROWSERS"):
-            _routes_mod.OPENED_ADMIN_BROWSERS = []
-        
-        # Close any existing open browser window for this session_id to avoid duplicate windows
-        for b in list(_routes_mod.OPENED_ADMIN_BROWSERS):
-            if b.get("session_id") == session_id:
-                try:
-                    await b["browser"].close()
-                except Exception:
-                    pass
-                try:
-                    await b["playwright"].stop()
-                except Exception:
-                    pass
-                if b in _routes_mod.OPENED_ADMIN_BROWSERS:
-                    _routes_mod.OPENED_ADMIN_BROWSERS.remove(b)
-
-        # Clean up closed browsers first
-        active_list = []
-        for b in _routes_mod.OPENED_ADMIN_BROWSERS:
-            try:
-                if not b["page"].is_closed():
-                    active_list.append(b)
-            except Exception:
-                pass
-        _routes_mod.OPENED_ADMIN_BROWSERS = active_list
-        
-        _routes_mod.OPENED_ADMIN_BROWSERS.append({
-            "playwright": pw, "browser": browser, "context": context, "page": page,
-            "session_id": session_id, "mobile": session.mobile_number
-        })
-
-        # Inactivity auto-close task (15 minutes idle timeout)
-        async def monitor_inactivity(sess_id, browser_obj, context_obj, page_obj):
-            import time, asyncio, json
-            from .database import SessionLocal, DominosSession
-            from .services.dominos_session_manager import is_page_alive
-            try:
-                # Initialize lastActivity on page loading/navigation
-                await page_obj.evaluate("""() => {
-                    window.lastActivity = Date.now();
-                    const logActivity = () => { window.lastActivity = Date.now(); };
-                    window.addEventListener('mousemove', logActivity);
-                    window.addEventListener('keydown', logActivity);
-                    window.addEventListener('click', logActivity);
-                    window.addEventListener('scroll', logActivity);
-                }""")
-                
-                # Retrieve the target mobile number for this session
-                target_mobile = None
-                db_session = SessionLocal()
-                try:
-                    sess = db_session.query(DominosSession).filter(DominosSession.id == sess_id).first()
-                    if sess:
-                        target_mobile = sess.mobile_number
-                except Exception:
-                    pass
-                finally:
-                    db_session.close()
-                
-                last_cookies = []
-                last_local_storage = None
-                
-                while True:
-                    if not await is_page_alive(page_obj):
-                        break
-                        
-                    try:
-                        # Extract cookies and localStorage periodically while open
-                        cookies = await context_obj.cookies()
-                        if cookies:
-                            from .services.dominos_session_manager import verify_logged_in_mobile, LOGIN_COOKIES
-                            has_cookie = any(c.get("name") in LOGIN_COOKIES for c in cookies)
-                            is_match = True
-                            if has_cookie and target_mobile:
-                                is_match = await verify_logged_in_mobile(page_obj, target_mobile)
-                                
-                            if is_match:
-                                last_cookies = cookies
-                                ls_str = await page_obj.evaluate("() => JSON.stringify(localStorage)")
-                                if ls_str:
-                                    last_local_storage = json.loads(ls_str)
-                                    
-                                # Auto-save every 5 seconds to database and clear duplicates
-                                db_session = SessionLocal()
-                                try:
-                                    if target_mobile:
-                                        db_session.query(DominosSession).filter(
-                                            DominosSession.mobile_number == target_mobile,
-                                            DominosSession.id != sess_id
-                                        ).delete()
-                                    
-                                    sess = db_session.query(DominosSession).filter(DominosSession.id == sess_id).first()
-                                    if sess:
-                                        sess.cookies = sanitize_cookies(cookies)
-                                        if last_local_storage:
-                                            sess.local_storage = last_local_storage
-                                        sess.verify_status = "valid"
-                                        sess.is_active = True
-                                        sess.last_verified_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-                                        db_session.commit()
-                                        logger.debug(f"[SESSION MONITOR] Auto-saved session {sess_id} to database (cleared duplicates).")
-                                except Exception as save_err:
-                                    logger.error(f"[SESSION MONITOR] Auto-save database error: {save_err}")
-                                finally:
-                                    db_session.close()
-                            else:
-                                logger.warning(f"[SESSION MONITOR] Mismatched account detected in browser for +91{target_mobile}. Skipping cookie capture.")
-                    except Exception:
-                        pass
-                        
-                    # Sleep 5 seconds between captures
-                    await asyncio.sleep(5)
-                    
-                    if not await is_page_alive(page_obj):
-                        break
-                        
-                    try:
-                        last_act = await page_obj.evaluate("window.lastActivity")
-                        if not last_act:
-                            # Re-bind activity listener if page was navigated or refreshed
-                            await page_obj.evaluate("""() => {
-                                window.lastActivity = Date.now();
-                                const logActivity = () => { window.lastActivity = Date.now(); };
-                                window.addEventListener('mousemove', logActivity);
-                                window.addEventListener('keydown', logActivity);
-                                window.addEventListener('click', logActivity);
-                                window.addEventListener('scroll', logActivity);
-                            }""")
-                            last_act = time.time() * 1000
-
-                        elapsed = (time.time() * 1000) - last_act
-                        if elapsed > 900000: # 15 minutes (900 seconds)
-                            logger.info(f"[SESSION AUTO-CLOSE] Browser idle for {elapsed/1000:.1f}s. Auto-closing...")
-                            break
-                    except Exception:
-                        pass
-                
-                # Final save upon closing/exit just to make sure latest state is preserved
-                if last_cookies:
-                    db_session = SessionLocal()
-                    try:
-                        if target_mobile:
-                            db_session.query(DominosSession).filter(
-                                DominosSession.mobile_number == target_mobile,
-                                DominosSession.id != sess_id
-                            ).delete()
-                        sess = db_session.query(DominosSession).filter(DominosSession.id == sess_id).first()
-                        if sess:
-                            sess.cookies = sanitize_cookies(last_cookies)
-                            if last_local_storage:
-                                sess.local_storage = last_local_storage
-                            sess.verify_status = "valid"
-                            sess.is_active = True
-                            sess.last_verified_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-                            db_session.commit()
-                            logger.info(f"[SESSION AUTO-CLOSE] Saved session {sess_id} updates to database on exit.")
-                    except Exception as commit_err:
-                        logger.error(f"[SESSION AUTO-CLOSE] Failed to commit session on exit: {commit_err}")
-                    finally:
-                        db_session.close()
-                
-                try:
-                    await browser_obj.close()
-                except Exception:
-                    pass
-                try:
-                    await pw.stop()
-                except Exception:
-                    pass
-            except Exception as se:
-                err_str = str(se)
-                benign = ("Target page, context or browser has been closed" in err_str
-                          or "Target closed" in err_str
-                          or "Execution context was destroyed" in err_str
-                          or "most likely because of a navigation" in err_str)
-                if not benign:
-                    logger.error(f"[SESSION MONITOR ERR] {se}")
-
-        import asyncio
-        asyncio.create_task(monitor_inactivity(session_id, browser, context, page))
-        
-        await log_admin_action(db, admin.id, admin.username, "DOMINOS_SESSION_BROWSER_OPENED",
-            {"session_id": session_id, "mobile_number": session.mobile_number}, request)
-        return {"status": "success", "message": f"🌐 Browser opened for +91{session.mobile_number} with saved cookies loaded!"}
-    except Exception as e:
-        import traceback as _tb
-        logger.error(f"[OPEN BROWSER ERROR] {e}\n{_tb.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Failed to open browser: {str(e)[:200]}")
+# ============================================================
+# REMOVED OPEN BROWSER ROUTE
+# ============================================================
 
 
 OPENED_ADMIN_BROWSERS = []
@@ -4414,8 +4460,12 @@ async def approve_payment_manually(attempt_id: str, request: Request = None, db:
     if attempt:
         order_id_target = attempt.order_id
         utr_val = attempt.utr
-    elif attempt_id.startswith("ORDER_"):
-        order_id_target = attempt_id.replace("ORDER_", "")
+    else:
+        # Check if the attempt_id itself or without ORDER_ prefix is an existing Order ID
+        clean_id = attempt_id.replace("ORDER_", "")
+        order_exists = db.query(Order).filter(Order.id == clean_id).first()
+        if order_exists:
+            order_id_target = clean_id
         
     order = db.query(Order).filter(Order.id == order_id_target).first() if order_id_target else None
     if not order:
@@ -4467,24 +4517,13 @@ async def approve_payment_manually(attempt_id: str, request: Request = None, db:
         return {"status": "success", "message": "Wallet top-up manually approved successfully"}
 
 
-    # Allocate a gift card manually if available
-    gift_card = db.query(GiftCard).filter(GiftCard.status == "available").first()
-    if gift_card:
-        gift_card.status = "used"
-        gift_card.used_by_user_id = order.user_id
-        gift_card.used_in_order_id = order.id
-        gift_card.used_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-        order.gift_card_id = gift_card.id
-    else:
-        logger.warning(f"No available gift cards in inventory when manually approving order {order.id}. Proceeding with order placement directly.")
-        
-    order.status = "Order Processing"
+    order.status = "Paid"
     if attempt:
         attempt.is_successful = True
     
     h1 = OrderStatusHistory(order_id=order.id, status="Manual Payment Approved")
     db.add(h1)
-    h2 = OrderStatusHistory(order_id=order.id, status="Order Processing")
+    h2 = OrderStatusHistory(order_id=order.id, status="Paid")
     db.add(h2)
     
     audit = AuditLog(admin_id=admin.id, action="MANUAL_PAYMENT_APPROVED", details=json.dumps({
@@ -4495,19 +4534,16 @@ async def approve_payment_manually(attempt_id: str, request: Request = None, db:
     db.add(audit)
     db.commit()
     
-    if background_tasks:
-        background_tasks.add_task(run_order_placement_task, order.id)
-        
     success_text = (
         f"💳 <b>Payment Confirmed (Manual Admin Approval)!</b>\n"
         f"We verified your payment for Order ID: <code>{order.id}</code>.\n\n"
-        f"👩‍🍳 <b>Order Status: Processing</b>\n"
-        f"Your order is now being dispatched to the kitchen!"
+        f"⏳ <b>Order Status: Paid / Review</b>\n"
+        f"The administrator is currently placing your order manually on Domino's. You will receive updates shortly!"
     )
     await send_bot_message(order.user.telegram_id, success_text)
     
     if sse_broadcast_callback:
-        await sse_broadcast_callback({"type": "order_update", "order_id": order.id, "status": "Order Processing"})
+        await sse_broadcast_callback({"type": "order_update", "order_id": order.id, "status": "Paid"})
         
     return {"status": "success", "message": "Payment manually approved successfully"}
 
@@ -4568,6 +4604,12 @@ async def verify_payment(order_id: str, payload: PaymentVerifyRequest, request: 
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
         
+    # Check if order is too old (timeout: 20 minutes)
+    import datetime
+    order_age_seconds = (datetime.datetime.utcnow() - order.created_at).total_seconds()
+    if order_age_seconds > 1200:
+        raise HTTPException(status_code=400, detail="This payment verification window has expired (20 minutes limit). Please place a new order.")
+        
     # Rate limit: 3 failed attempts per order ID
     failed_attempts = db.query(UTRAttempt).filter(
         UTRAttempt.order_id == order_id,
@@ -4600,9 +4642,17 @@ async def verify_payment(order_id: str, payload: PaymentVerifyRequest, request: 
     
     is_success = False
     if verified:
+        # Check if already linked to another order to prevent reuse
+        if verified.order_id and verified.order_id != order_id:
+            attempt = UTRAttempt(order_id=order_id, utr=utr, is_successful=False)
+            db.add(attempt)
+            db.commit()
+            raise HTTPException(status_code=400, detail="This UTR has already been used for another order.")
+            
         # Check if amount matches total_payable
         if abs(verified.amount - order.total_payable) < 0.1:
             is_success = True
+            verified.order_id = order_id
             
     # Record the attempt
     attempt = UTRAttempt(
@@ -4700,17 +4750,48 @@ async def verify_payment(order_id: str, payload: PaymentVerifyRequest, request: 
     db.add(admin_log)
     db.commit()
     
-    if background_tasks:
-        background_tasks.add_task(run_order_placement_task, order.id)
-    
     # Send user success notification (Redacted code/pin per privacy policy)
     await send_bot_message(
         user.telegram_id,
         f"💳 <b>Payment Confirmed!</b>\n"
         f"We verified your payment of <b>₹{order.total_payable:.2f}</b> for Order ID: <code>{order.id}</code> (UTR: <code>{utr}</code>).\n\n"
-        f"👩‍🍳 <b>Order Status: Processing</b>\n"
-        f"Your order is now being dispatched to the kitchen. Estimated delivery in 30 minutes!"
+        f"⏳ <b>Order Status: Paid / Review</b>\n"
+        f"The administrator is currently placing your order manually on Domino's. You will receive updates shortly!"
     )
+
+    # Notify admins via Telegram Bot
+    from .bot import notify_admins
+    item_names = []
+    for item in order.items:
+        if item.product:
+            item_names.append(f"• {item.product.name} x{item.quantity}")
+    items_summary = "\n".join(item_names)
+
+    admin_order_text = (
+        "🔔 <b>Payment Confirmed! New Manual Action Required:</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🆔 <b>Order ID:</b> <code>{order.id}</code>\n"
+        f"👤 <b>User:</b> {user.display_name} (ID: <code>{user.telegram_id}</code>)\n"
+        f"🛒 <b>Items:</b>\n{items_summary}\n\n"
+        f"💰 <b>Total Paid:</b> ₹{order.total_payable:.2f} (UTR: <code>{utr}</code>)\n"
+        f"🏡 <b>Address:</b> <code>{order.address}</code>\n"
+        f"📱 <b>Phone:</b> <code>{order.phone}</code>\n"
+        f"📍 <b>GPS:</b> <code>{user.latitude or 'None'}, {user.longitude or 'None'}</code>\n\n"
+        "👩‍🍳 <b>Actions:</b>"
+    )
+    
+    action_markup = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Accept & Complete", "callback_data": f"admin_act_complete_{order.id}"},
+                {"text": "❌ Reject & Refund", "callback_data": f"admin_act_reject_{order.id}"}
+            ],
+            [
+                {"text": "💬 Reply to Customer", "callback_data": f"admin_reply_support_{user.telegram_id}"}
+            ]
+        ]
+    }
+    await notify_admins(db, admin_order_text, reply_markup=action_markup)
     
     if sse_broadcast_callback:
         await sse_broadcast_callback({
@@ -4851,8 +4932,12 @@ async def reject_payment_manually(attempt_id: str, db: Session = Depends(get_db)
     if attempt:
         order_id_target = attempt.order_id
         utr_val = attempt.utr
-    elif attempt_id.startswith("ORDER_"):
-        order_id_target = attempt_id.replace("ORDER_", "")
+    else:
+        # Check if the attempt_id itself or without ORDER_ prefix is an existing Order ID
+        clean_id = attempt_id.replace("ORDER_", "")
+        order_exists = db.query(Order).filter(Order.id == clean_id).first()
+        if order_exists:
+            order_id_target = clean_id
         
     order = db.query(Order).filter(Order.id == order_id_target).first() if order_id_target else None
     if not order:
@@ -5029,3 +5114,59 @@ def get_wallet_ledger(user_id: str, offset: int = 0, limit: int = 20, db: Sessio
             "created_at": t.created_at.isoformat() if t.created_at else None
         } for t in txs]
     }
+
+
+# ========================
+# Telegram Bot Webhook Routes
+# ========================
+
+@router.post("/telegram-webhook")
+async def telegram_webhook(request: Request):
+    """
+    Webhook endpoint for receiving Telegram updates.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+        
+    from .bot import handle_incoming_update
+    await handle_incoming_update(payload)
+    return {"status": "ok"}
+
+
+@router.post("/admin/bot/setup-webhook")
+async def setup_bot_webhook(payload: dict, db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
+    """
+    Admin endpoint to set up or clear the Telegram bot webhook URL.
+    """
+    webhook_url = payload.get("webhook_url")
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    
+    if not bot_token or bot_token == "MOCK_TOKEN":
+        raise HTTPException(status_code=400, detail="Bot token is missing or is set to MOCK_TOKEN.")
+        
+    import httpx
+    async with httpx.AsyncClient() as client:
+        if webhook_url:
+            # Set webhook on Telegram API
+            url = f"https://api.telegram.org/bot{bot_token}/setWebhook"
+            setup_payload = {
+                "url": webhook_url,
+                "allowed_updates": ["message", "edited_message", "callback_query"],
+                "drop_pending_updates": True
+            }
+            resp = await client.post(url, json=setup_payload, timeout=10.0)
+        else:
+            # Delete webhook
+            url = f"https://api.telegram.org/bot{bot_token}/deleteWebhook"
+            resp = await client.post(url, json={"drop_pending_updates": True}, timeout=10.0)
+            
+        if resp.status_code == 200:
+            # Log audit log
+            audit = AuditLog(admin_id=admin.id, action="BOT_WEBHOOK_UPDATE", details=f"Webhook URL: {webhook_url or 'Cleared'}")
+            db.add(audit)
+            db.commit()
+            return {"status": "success", "response": resp.json()}
+        else:
+            raise HTTPException(status_code=resp.status_code, detail=f"Telegram API error: {resp.text}")
