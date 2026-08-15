@@ -1,0 +1,11 @@
+app/backend/firebase-key.json
+app/backend/firebase-key.json
+*.pyc
+data/*.db-shm
+*.pyc
+data/*.db-shm
+data/*.db-wal
+__pycache__/
+*.pyc
+data/*.db-shm
+data/*.db-wal

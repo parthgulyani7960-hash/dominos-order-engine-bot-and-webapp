@@ -227,6 +227,7 @@ class Order(TimestampMixin, Base):
     dominos_reference     = Column(String, nullable=True)
     device_id             = Column(String, nullable=True)
     device_details        = Column(Text, nullable=True)
+    sector_store          = Column(String, nullable=True)
     version               = Column(Integer, default=0, nullable=False)  # optimistic locking
 
     user           = relationship("User", back_populates="orders")
@@ -574,6 +575,8 @@ def init_db() -> None:
             conn.execute(text("ALTER TABLE orders ADD COLUMN device_id VARCHAR"))
         if "device_details" not in order_cols:
             conn.execute(text("ALTER TABLE orders ADD COLUMN device_details TEXT"))
+        if "sector_store" not in order_cols:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN sector_store VARCHAR"))
 
         # Create withdrawal_requests table if not exists
         if not insp.has_table("withdrawal_requests"):
@@ -600,6 +603,20 @@ def init_db() -> None:
                     conn.execute(text(f"DROP TABLE {table}"))
                 except Exception:
                     pass
+
+    # Initialize Firebase and restore/sync database state
+    try:
+        import logging
+        from .firebase_sync import init_firebase, restore_database_from_firebase
+        if init_firebase():
+            sess = SessionLocal()
+            try:
+                restore_database_from_firebase(sess)
+            finally:
+                sess.close()
+    except Exception as e:
+        logger = logging.getLogger("app.backend.database")
+        logger.error(f"Error during firebase restore/sync: {e}")
 
 
 # ---------------------------------------------------------------------------
