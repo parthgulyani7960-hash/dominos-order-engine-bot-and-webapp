@@ -2229,6 +2229,41 @@ def get_login_attempts(db: Session = Depends(get_db), admin: User = Depends(get_
         })
     return result
 
+class UserRoleUpdateSchema(BaseModel):
+    role: str
+
+@router.put("/admin/users/{user_id}/role")
+async def update_user_role(
+    user_id: str,
+    payload: UserRoleUpdateSchema,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin)
+):
+    """Change a user's role (promote to admin or demote to regular user)."""
+    if payload.role not in ["user", "admin"]:
+        raise HTTPException(status_code=400, detail="Invalid role. Must be 'user' or 'admin'")
+
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if target_user.id == admin.id:
+        raise HTTPException(status_code=400, detail="You cannot change your own role")
+
+    old_role = target_user.role
+    target_user.role = payload.role
+    db.commit()
+
+    # Log administrative action
+    await log_admin_action(
+        db, admin.id, admin.username or "admin", "USER_ROLE_UPDATED",
+        {"user_id": user_id, "old_role": old_role, "new_role": payload.role, "user": target_user.display_name},
+        request
+    )
+
+    return {"status": "success", "message": f"User role updated to {payload.role}"}
+
 class BlockUserRequest(BaseModel):
     blocked: Optional[bool] = None
     is_blocked: Optional[bool] = None
@@ -2604,6 +2639,41 @@ def delete_location_pricing(
     db.commit()
     return {"status": "deleted"}
 
+
+
+class OrderDetailsUpdateSchema(BaseModel):
+    dominos_reference: Optional[str] = None
+    sector_store: Optional[str] = None
+
+@router.put("/admin/orders/{order_id}/details")
+async def update_order_details(
+    order_id: str,
+    payload: OrderDetailsUpdateSchema,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin)
+):
+    """Update order specific administrative details like Domino's Reference and Sector Store."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if payload.dominos_reference is not None:
+        order.dominos_reference = payload.dominos_reference.strip() or None
+
+    if payload.sector_store is not None:
+        order.sector_store = payload.sector_store.strip() or None
+
+    db.commit()
+
+    # Log administrative action
+    await log_admin_action(
+        db, admin.id, admin.username or "admin", "ORDER_DETAILS_UPDATED",
+        {"order_id": order_id, "dominos_reference": order.dominos_reference, "sector_store": order.sector_store},
+        request
+    )
+
+    return {"status": "success", "message": "Order details updated successfully"}
 
 
 # ============================================================

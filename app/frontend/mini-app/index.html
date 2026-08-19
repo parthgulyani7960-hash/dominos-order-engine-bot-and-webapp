@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Domino's Order Engine — Order Online</title>
+  <meta name="description" content="Order fresh, hot pizzas with real-time tracking." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="/style.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body class="loading-state">
+
+  <!-- ===== SPLASH SCREEN ===== -->
+  <div id="splash-screen" class="splash-screen">
+    <div class="splash-logo">
+      <span class="splash-icon">🍕</span>
+      <h1 class="splash-title">Domino's Order Engine</h1>
+      <p class="splash-subtitle">Loading your experience...</p>
+    </div>
+    <div class="splash-loader">
+      <div class="loader-bar"></div>
+    </div>
+  </div>
+
+  <!-- ===== MAIN APP ===== -->
+  <div id="app" class="app hidden">
+
+    <!-- TOP BAR -->
+    <header class="top-bar" id="top-bar">
+      <div class="top-bar-left">
+        <div class="user-avatar" id="user-avatar-btn">
+          <img id="user-photo" src="" alt="" class="hidden" />
+          <span id="user-initial">?</span>
+        </div>
+        <div class="user-info">
+          <span class="user-greeting">Hello,</span>
+          <span class="user-name" id="user-name-display">Loading...</span>
+        </div>
+      </div>
+      <div class="top-bar-right">
+        <button class="icon-btn notif-btn" id="notif-btn" aria-label="Notifications">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="notif-badge hidden" id="notif-badge">0</span>
+        </button>
+        <div class="location-pill" id="location-pill">
+          <span class="location-icon">📍</span>
+          <span class="location-city" id="location-city">Detecting...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- NOTIFICATION PANEL -->
+    <div class="notif-panel hidden" id="notif-panel">
+      <div class="notif-panel-header">
+        <h3>Notifications</h3>
+        <button class="text-btn" id="mark-all-read-btn">Mark all read</button>
+      </div>
+      <div class="notif-list" id="notif-list">
+        <div class="notif-empty">No notifications yet</div>
+      </div>
+    </div>
+    <div class="panel-overlay hidden" id="panel-overlay"></div>
+
+    <!-- ===== PAGES ===== -->
+    <div class="pages-container" id="pages-container">
+
+      <!-- HOME PAGE -->
+      <div class="page active" id="page-home">
+        <!-- Hero Banner -->
+        <div class="hero-banner">
+          <div class="hero-content">
+            <div class="hero-badge">🔥 Today's Special</div>
+            <h2 class="hero-title">Pizza Mania<br /><span>Starting ₹89</span></h2>
+            <p class="hero-sub">Fresh, hot, delivered to your door</p>
+            <button class="btn btn-primary hero-cta" id="hero-order-btn">Order Now</button>
+          </div>
+          <div class="hero-visual">🍕</div>
+        </div>
+
+        <!-- Delivery ETA Card -->
+        <div class="eta-card" id="eta-card">
+          <div class="eta-icon">🚀</div>
+          <div class="eta-info">
+            <span class="eta-label">Estimated Delivery</span>
+            <span class="eta-value" id="eta-value">~30 mins</span>
+          </div>
+          <div class="eta-delivery-charge">
+            <span class="eta-charge-label">Delivery</span>
+            <span class="eta-charge-val" id="eta-charge">₹30</span>
+          </div>
+        </div>
+
+        <!-- Categories Quick Scroll -->
+        <div class="section-header">
+          <h3 class="section-title">Explore Menu</h3>
+          <button class="text-btn" id="see-all-btn">See all</button>
+        </div>
+        <div class="category-scroll" id="home-categories">
+          <!-- Populated by JS -->
+        </div>
+
+        <!-- Popular Picks -->
+        <div class="section-header">
+          <h3 class="section-title">🔥 Popular Picks</h3>
+        </div>
+        <div class="product-grid" id="popular-grid">
+          <!-- Populated by JS -->
+        </div>
+
+        <!-- Recommended For You -->
+        <div class="section-header">
+          <h3 class="section-title">⭐ Recommended</h3>
+        </div>
+        <div class="product-grid" id="recommended-grid">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- MENU PAGE -->
+      <div class="page" id="page-menu">
+        <div class="menu-search-wrap">
+          <div class="search-box">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input type="text" class="search-input" id="menu-search" placeholder="Search pizzas..." />
+          </div>
+          <!-- Veg Toggle -->
+          <div class="veg-toggle-wrap">
+            <label class="veg-toggle">
+              <input type="checkbox" id="veg-only-toggle" />
+              <span class="veg-slider"></span>
+              <span class="veg-label">Veg</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Category Tabs -->
+        <div class="category-tabs" id="menu-category-tabs">
+          <button class="cat-tab active" data-cat="all">All</button>
+          <!-- Populated by JS -->
+        </div>
+
+        <!-- Product List -->
+        <div class="product-list" id="menu-product-list">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- OFFERS PAGE -->
+      <div class="page" id="page-offers" style="padding: 16px;">
+        <h2 class="page-title">Offers & Help</h2>
+        
+        <!-- Quick Checkout Shortcut Banner -->
+        <div class="shortcut-banner" style="background: linear-gradient(135deg, #0f172a, #1e293b); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 16px; padding: 20px; color: #fff; margin-bottom: 24px; position: relative; overflow: hidden; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3)">
+          <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #3b82f6; margin-bottom: 6px">⚡ Instant Deal</div>
+          <h3 style="font-size: 20px; margin: 0 0 8px 0; font-weight: 800; font-family: 'Outfit', sans-serif">2x Cheeseburst Margherita</h3>
+          <p style="font-size: 13px; margin: 0 0 16px 0; opacity: 0.8; line-height: 1.4">Get 2 Veg Medium Cheese Burst Margherita pizzas delivered instantly for <b>₹410.00</b>!</p>
+          <button class="btn" id="quick-checkout-btn" style="background: #2563eb; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; transition: background 0.2s, transform 0.2s; box-shadow: 0 4px 6px -1px rgba(37,99,235,0.4)">Order Instantly</button>
+          <div style="position: absolute; right: -15px; bottom: -15px; font-size: 80px; opacity: 0.15; transform: rotate(15deg)">🍕</div>
+        </div>
+
+        <!-- FAQs / Offers info -->
+        <div class="faq-section" style="margin-top: 20px">
+          <h3 class="section-title">💡 FAQ & Pricing Rules</h3>
+          
+          <div class="faq-list" style="display: flex; flex-direction: column; gap: 12px; margin-top: 12px">
+            <div class="faq-item" style="background: rgba(255,255,255,0.03); padding: 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05)">
+              <h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 700; color: #fff">❓ How does the Pizza Pricing Cap work?</h4>
+              <p style="margin: 0; font-size: 12.5px; color: #94a3b8; line-height: 1.5">For orders with subtotals between <b>₹180.00</b> and <b>₹220.00</b>, the base price is capped at a fixed rate of <b>₹100.00</b> + the Bot Service Fee. An eligible coupon code is auto-applied!</p>
+            </div>
+            
+            <div class="faq-item" style="background: rgba(255,255,255,0.03); padding: 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05)">
+              <h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 700; color: #fff">❓ What if my cart is outside the cap range?</h4>
+              <p style="margin: 0; font-size: 12.5px; color: #94a3b8; line-height: 1.5">If the subtotal is below ₹180 or above ₹220, the order does not receive a price cap. Instead, a flat <b>₹5.00 service fee</b> is charged, and no auto-coupon is applied.</p>
+            </div>
+
+            <div class="faq-item" style="background: rgba(255,255,255,0.03); padding: 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05)">
+              <h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 700; color: #fff">❓ What is my benefit from this offer?</h4>
+              <p style="margin: 0; font-size: 12.5px; color: #94a3b8; line-height: 1.5">You get a pizza order worth up to ₹199 - ₹200 for exactly ₹100! The discount is applied automatically behind the scenes.</p>
+            </div>
+            
+            <div class="faq-item" style="background: rgba(255,255,255,0.03); padding: 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05)">
+              <h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 700; color: #fff">❓ How do I order and place it?</h4>
+              <p style="margin: 0; font-size: 12.5px; color: #94a3b8; line-height: 1.5">Simply add pizzas to your cart. Once your cart subtotal is in the capping range, check out by providing your delivery address, phone number, and location on the map. Pay using your wallet or UPI QR code, and submit the 12-digit UTR to place the order.</p>
+            </div>
+            
+            <div class="faq-item" style="background: rgba(255,255,255,0.03); padding: 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05)">
+              <h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 700; color: #fff">❓ How can I pay?</h4>
+              <p style="margin: 0; font-size: 12.5px; color: #94a3b8; line-height: 1.5">You can pay using your <b>Wallet balance</b> or via <b>direct UPI payment</b> by scanning the QR code and verifying the 12-digit transaction UTR number.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CART PAGE -->
+      <div class="page" id="page-cart">
+        <div class="cart-header">
+          <h2 class="page-title">Your Cart</h2>
+          <button class="text-btn danger" id="clear-cart-btn">Clear</button>
+        </div>
+
+        <!-- Location Section -->
+        <div class="location-section" id="location-section">
+          <div class="loc-header">
+            <span class="loc-icon">📍</span>
+            <span class="loc-title">Delivery Address</span>
+            <button class="text-btn" id="detect-location-btn">Detect</button>
+          </div>
+          <div class="loc-detected" id="loc-detected-display">
+            <span id="detected-address-text">Tap Detect to find your location</span>
+          </div>
+          <div class="saved-addresses-row" id="saved-addresses-row">
+            <!-- Saved address chips populated by JS -->
+          </div>
+          <div class="loc-form" id="loc-form">
+            <input type="text" class="form-input" id="delivery-address" placeholder="Full delivery address *" />
+            <input type="text" class="form-input" id="delivery-landmark" placeholder="Landmark / Floor / Building (optional)" />
+            <input type="tel" class="form-input" id="delivery-phone" placeholder="Phone number *" />
+            <div class="save-address-row">
+              <label class="checkbox-label">
+                <input type="checkbox" id="save-address-check" />
+                <span>Save this address</span>
+              </label>
+              <select class="addr-label-select hidden" id="addr-label-select">
+                <option value="Home">🏠 Home</option>
+                <option value="Work">💼 Work</option>
+                <option value="Other">📌 Other</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cart Items -->
+        <div class="cart-items-wrap" id="cart-items-wrap">
+          <div class="cart-empty hidden" id="cart-empty">
+            <div class="cart-empty-icon">🛒</div>
+            <h3>Your cart is empty</h3>
+            <p>Add some delicious pizzas to get started!</p>
+            <button class="btn btn-primary" id="browse-menu-btn">Browse Menu</button>
+          </div>
+          <div id="cart-items-list">
+            <!-- Cart items populated by JS -->
+          </div>
+        </div>
+
+
+
+        <!-- Price Summary -->
+        <div class="price-summary" id="price-summary">
+          <div class="price-row">
+            <span>Subtotal</span>
+            <span id="summary-subtotal">₹0</span>
+          </div>
+          <div class="price-row discount-row" id="discount-row" style="display:none">
+            <span>Discount</span>
+            <span id="summary-discount" class="discount-text">-₹0</span>
+          </div>
+          <div class="price-row" id="delivery-row" style="display:none">
+            <span>Delivery Charge</span>
+            <span id="summary-delivery">₹0</span>
+          </div>
+          <div class="price-row" id="fee-row">
+            <span>Bot Service Fee</span>
+            <span id="summary-fee">₹0</span>
+          </div>
+          <div class="price-row" id="coupon-row" style="display:none">
+            <span>Coupon (<span id="coupon-name"></span>)</span>
+            <span class="discount-text" id="coupon-saving"></span>
+          </div>
+          <div class="price-divider"></div>
+          <div class="price-row total-row">
+            <span>Total Payable</span>
+            <span id="summary-total">₹0</span>
+          </div>
+          <div class="location-pricing-note" id="location-pricing-note" style="display:none">
+            <span>📍 Price includes local adjustment for your area</span>
+          </div>
+        </div>
+
+        <!-- Payment & Checkout -->
+        <div class="payment-section" id="payment-section">
+          <h4 class="payment-title">Payment Method</h4>
+          <div class="payment-options">
+            <label class="payment-opt active" id="pm-upi">
+              <input type="radio" name="payment" value="direct" checked />
+              <span class="pm-icon">📱</span>
+              <span class="pm-label">UPI / QR Code</span>
+            </label>
+            <label class="payment-opt" id="pm-wallet">
+              <input type="radio" name="payment" value="wallet" />
+              <span class="pm-icon">💰</span>
+              <span class="pm-label">Wallet</span>
+            </label>
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-full checkout-btn" id="checkout-btn">
+          <span class="checkout-btn-icon">🍕</span>
+          Place Order &nbsp;·&nbsp; <span id="checkout-total">₹0</span>
+        </button>
+      </div>
+
+      <!-- ORDERS PAGE -->
+      <div class="page" id="page-orders">
+        <h2 class="page-title">My Orders</h2>
+        <div class="orders-filter">
+          <button class="filter-tab active" data-filter="all">All</button>
+          <button class="filter-tab" data-filter="active">Active</button>
+          <button class="filter-tab" data-filter="completed">Completed</button>
+        </div>
+        <div id="orders-list">
+          <div class="orders-empty hidden" id="orders-empty">
+            <div class="orders-empty-icon">📦</div>
+            <h3>No orders yet</h3>
+            <p>Your order history will appear here</p>
+            <button class="btn btn-primary" id="start-ordering-btn">Start Ordering</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PROFILE PAGE -->
+      <div class="page" id="page-profile">
+        <div class="profile-hero">
+          <div class="profile-avatar">
+            <img id="profile-photo" src="" alt="" class="hidden" />
+            <span id="profile-initial">?</span>
+          </div>
+          <div class="profile-info">
+            <h2 id="profile-name" class="profile-name">Loading...</h2>
+            <p id="profile-username" class="profile-username">@username</p>
+          </div>
+        </div>
+
+        <div class="profile-section">
+          <h4 class="profile-section-title">Personal Info</h4>
+          <div class="profile-field">
+            <label>Phone Number</label>
+            <div class="profile-field-row">
+              <input type="tel" id="profile-phone" class="form-input" placeholder="+91 XXXXX XXXXX" />
+              <button class="btn btn-outline btn-sm" id="save-phone-btn">Save</button>
+            </div>
+          </div>
+          <div class="profile-field" style="margin-top:12px;">
+            <label>Telegram Account Connection</label>
+            <div id="telegram-link-section">
+              <div class="profile-field-row">
+                <input type="text" id="link-telegram-id" class="form-input" placeholder="Your Telegram ID" />
+                <button class="btn btn-outline btn-sm" id="link-telegram-btn">Verify</button>
+              </div>
+              <div id="telegram-link-instructions" class="hidden" style="font-size:0.75rem;color:#ff922b;margin-top:6px;line-height:1.4;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="profile-section">
+          <h4 class="profile-section-title">Saved Addresses</h4>
+          <div id="profile-addresses">
+            <div class="profile-empty-state">No saved addresses</div>
+          </div>
+          <button class="btn btn-outline btn-full" id="add-address-btn">+ Add New Address</button>
+        </div>
+
+        <div class="profile-section">
+          <h4 class="profile-section-title">Account</h4>
+          <div class="profile-menu">
+            <button class="profile-menu-item" id="order-history-link">
+              <span>📦</span> Order History
+              <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+            <button class="profile-menu-item" id="support-link">
+              <span>💬</span> Support Chat
+              <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+            <button class="profile-menu-item" id="logout-btn">
+              <span>🚪</span> Sign Out
+              <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /pages-container -->
+
+    <!-- ===== BOTTOM NAV ===== -->
+    <nav class="bottom-nav" id="bottom-nav">
+      <button class="nav-item active" data-page="home" id="nav-home">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span>Home</span>
+      </button>
+      <button class="nav-item" data-page="menu" id="nav-menu">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+        <span>Menu</span>
+      </button>
+      <button class="nav-item" data-page="offers" id="nav-offers">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <span>Offers</span>
+      </button>
+      <button class="nav-item cart-nav" data-page="cart" id="nav-cart">
+        <div class="cart-nav-icon-wrap">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>
+          <span class="cart-count-badge hidden" id="cart-count-badge">0</span>
+        </div>
+        <span>Cart</span>
+      </button>
+      <button class="nav-item" data-page="orders" id="nav-orders">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        <span>Orders</span>
+      </button>
+      <button class="nav-item" data-page="profile" id="nav-profile">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span>Profile</span>
+      </button>
+    </nav>
+
+  </div><!-- /app -->
+
+  <!-- ===== MODALS ===== -->
+
+  <!-- Product Detail Modal -->
+  <div class="modal-overlay hidden" id="product-modal-overlay">
+    <div class="modal product-modal" id="product-modal">
+      <button class="modal-close" id="product-modal-close" aria-label="Close">✕</button>
+      <div class="product-modal-image-wrap">
+        <img id="pm-image" src="" alt="" />
+        <div class="pm-badges" id="pm-badges"></div>
+      </div>
+      <div class="product-modal-body">
+        <div class="pm-header">
+          <div class="pm-veg-indicator" id="pm-veg-indicator"></div>
+          <h3 id="pm-name" class="pm-name"></h3>
+        </div>
+        <p id="pm-description" class="pm-desc"></p>
+
+        <!-- Crust Options -->
+        <div class="pm-options" id="pm-crust-section" style="display:none">
+          <h4 class="pm-options-title">Choose Crust</h4>
+          <div class="pm-options-grid" id="pm-crust-grid"></div>
+        </div>
+
+        <!-- Size Options -->
+        <div class="pm-options" id="pm-size-section" style="display:none">
+          <h4 class="pm-options-title">Choose Size</h4>
+          <div class="pm-options-grid" id="pm-size-grid"></div>
+        </div>
+
+        <div class="pm-footer">
+          <div class="pm-price-wrap">
+            <span class="pm-original-price" id="pm-original-price"></span>
+            <span class="pm-price" id="pm-price"></span>
+            <span class="pm-discount-badge" id="pm-discount-badge" style="display:none"></span>
+          </div>
+          <div class="pm-qty-control">
+            <button class="qty-btn" id="pm-qty-minus">−</button>
+            <span class="qty-val" id="pm-qty">1</span>
+            <button class="qty-btn" id="pm-qty-plus">+</button>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-full" id="pm-add-to-cart">Add to Cart · <span id="pm-cart-total">₹0</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payment / QR Modal -->
+  <div class="modal-overlay hidden" id="payment-modal-overlay">
+    <div class="modal payment-modal" id="payment-modal">
+      <button class="modal-close" id="payment-modal-close">✕</button>
+      <h3 class="payment-modal-title">Complete Payment</h3>
+      <div class="qr-wrap">
+        <img id="qr-image" src="" alt="UPI QR Code" class="qr-img" />
+        <div class="qr-amount-pill">
+          <span>Pay</span>
+          <span id="qr-amount" class="qr-amount-val">₹0</span>
+        </div>
+      </div>
+      <div class="upi-id-row">
+        <span class="upi-id-label">UPI ID:</span>
+        <span class="upi-id-val" id="payment-upi-id">—</span>
+        <button class="icon-btn copy-btn" id="copy-upi-btn">📋</button>
+      </div>
+      <a id="qr-direct-pay-link" href="#" class="btn btn-primary btn-full" style="display: none; justify-content: center; align-items: center; text-decoration: none; margin-bottom: var(--space-md); font-weight: 700; background: #3B82F6;">
+        📱 Open UPI App to Pay
+      </a>
+      <div class="utr-section">
+        <p class="utr-instructions">After payment, enter the 12-digit UTR / reference number from your UPI app:</p>
+        <div class="utr-input-row">
+          <input type="text" class="form-input utr-input" id="utr-input" placeholder="UTR / Reference Number" maxlength="25" />
+          <button class="btn btn-primary" id="verify-utr-btn">Verify</button>
+        </div>
+        <div class="utr-msg hidden" id="utr-msg"></div>
+      </div>
+      <div class="payment-timer">
+        <span class="timer-icon">⏱</span>
+        <span>Order expires in <span id="payment-timer" class="timer-val">15:00</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Order Tracker Modal -->
+  <div class="modal-overlay hidden" id="tracker-modal-overlay">
+    <div class="modal tracker-modal" id="tracker-modal">
+      <button class="modal-close" id="tracker-modal-close">✕</button>
+      <div class="tracker-header">
+        <h3 class="tracker-order-id" id="tracker-order-id">Order #</h3>
+        <div class="tracker-status-badge" id="tracker-status-badge">Loading...</div>
+      </div>
+
+      <!-- Live Map -->
+      <div id="tracker-map" class="tracker-map"></div>
+
+      <!-- Rider Info Card -->
+      <div class="rider-card" id="rider-card" style="display:none">
+        <div class="rider-info">
+          <div class="rider-avatar">🛵</div>
+          <div class="rider-details">
+            <span class="rider-name" id="rider-name">—</span>
+            <span class="rider-vehicle" id="rider-vehicle">—</span>
+          </div>
+        </div>
+        <a class="btn btn-outline rider-call-btn" id="rider-call-btn" href="#">
+          📞 Call Rider
+        </a>
+      </div>
+
+      <!-- Delivery Details Card -->
+      <div class="delivery-details-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); padding: 12px; border-radius: 12px; margin-bottom: 12px;">
+        <h4 style="margin:0 0 8px 0; font-size: 0.9rem; color:#fff; font-weight:700;">Delivery Details</h4>
+        <div style="font-size:0.8rem; color:#94a3b8; line-height:1.4;">
+          <div style="margin-bottom:4px;"><b>Address:</b> <span id="tracker-address">—</span></div>
+          <div style="margin-bottom:4px;"><b>Landmark:</b> <span id="tracker-landmark">—</span></div>
+          <div style="margin-bottom:4px;"><b>Phone:</b> <span id="tracker-phone">—</span></div>
+          <div><b>Payment Method:</b> <span id="tracker-payment">—</span></div>
+        </div>
+      </div>
+
+      <!-- Progress Timeline -->
+      <div class="tracker-timeline" id="tracker-timeline">
+        <!-- Populated by JS -->
+      </div>
+
+      <!-- Order Items Summary -->
+      <div class="tracker-items" id="tracker-items"></div>
+    </div>
+  </div>
+  
+  <!-- Address Addition Modal -->
+  <div class="modal-overlay hidden" id="address-modal-overlay">
+    <div class="modal address-add-modal" id="address-modal">
+      <button class="modal-close" id="address-modal-close" style="background:transparent; border:none; color:#fff; font-size:1.2rem; cursor:pointer; position:absolute; top:10px; right:10px;">✕</button>
+      <h3 class="payment-modal-title" style="text-align:center; font-size:1.25rem; font-weight:600; margin-bottom:0.75rem;">Add New Address</h3>
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label style="display:block; font-size:0.85rem; color:#aaa; margin-bottom:0.4rem;">Label</label>
+        <select id="modal-addr-label-select" class="form-input" style="background:#1a1a1a; color:#fff; border:1px solid #333; width:100%; padding:0.75rem; border-radius:8px; font-size:0.95rem; outline:none; cursor:pointer;">
+          <option value="Home">Home 🏠</option>
+          <option value="Work">Work 💼</option>
+          <option value="Other">Other 📌</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label style="display:block; font-size:0.85rem; color:#aaa; margin-bottom:0.4rem;">Full Address</label>
+        <input type="text" id="modal-delivery-address" class="form-input" placeholder="House/Flat No., Building Name, Street..." style="background:#1a1a1a; color:#fff; border:1px solid #333; width:100%; padding:0.75rem; border-radius:8px; font-size:0.95rem; outline:none;" />
+      </div>
+      <div class="form-group" style="margin-bottom:1.25rem;">
+        <label style="display:block; font-size:0.85rem; color:#aaa; margin-bottom:0.4rem;">Landmark (Optional)</label>
+        <input type="text" id="modal-delivery-landmark" class="form-input" placeholder="Nearby landmark..." style="background:#1a1a1a; color:#fff; border:1px solid #333; width:100%; padding:0.75rem; border-radius:8px; font-size:0.95rem; outline:none;" />
+      </div>
+      <button class="btn btn-primary" id="save-modal-address-btn" style="width:100%; padding:0.75rem; border-radius:8px; font-size:1rem; font-weight:600; cursor:pointer;">Save Address</button>
+    </div>
+  </div>
+
+  <!-- Location Selection Modal -->
+  <div class="modal-overlay hidden" id="location-modal-overlay">
+    <div class="modal location-select-modal" id="location-modal">
+      <button class="modal-close" id="location-modal-close" style="background:transparent; border:none; color:#fff; font-size:1.2rem; cursor:pointer; position:absolute; top:10px; right:10px;">✕</button>
+      <h3 class="payment-modal-title" style="text-align:center; font-size:1.25rem; font-weight:600; margin-bottom:0.75rem;">Select Store Location</h3>
+      <p style="font-size:0.85rem; color:#aaa; margin-bottom:1.25rem; text-align:center; line-height:1.4;">
+        Choose your city to browse the correct Domino's menu options and local delivery parameters.
+      </p>
+      <div class="form-group" style="margin-bottom:1rem;">
+        <select id="location-city-select" class="form-input" style="background:#1a1a1a; color:#fff; border:1px solid #333; width:100%; padding:0.75rem; border-radius:8px; font-size:0.95rem; outline:none; cursor:pointer;">
+          <!-- Serviceable cities dropdown -->
+        </select>
+      </div>
+      <button class="btn btn-primary" id="save-location-btn" style="width:100%; padding:0.75rem; border-radius:8px; font-size:1rem; font-weight:600; cursor:pointer;">Save Location</button>
+    </div>
+  </div>
+
+  <!-- Toast Notifications -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/app.js?v=1.0.4"></script>
+</body>
+</html>
