@@ -664,12 +664,7 @@ async def schedule_daily_backup():
 
 app.include_router(api_router, prefix="/api")
 
-FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
 UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads"))
-os.makedirs(os.path.join(FRONTEND_DIR, "mini-app"), exist_ok=True)
-os.makedirs(os.path.join(FRONTEND_DIR, "admin"), exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
-app.mount("/admin", StaticFiles(directory=os.path.join(FRONTEND_DIR, "admin"), html=True), name="admin")
-app.mount("/", StaticFiles(directory=os.path.join(FRONTEND_DIR, "mini-app"), html=True), name="mini-app")
