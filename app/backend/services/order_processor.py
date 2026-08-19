@@ -246,6 +246,7 @@ def serialize_order(order: Order) -> dict:
         "coupon_applied": getattr(order, "coupon_applied", None),
         "dominos_reference": getattr(order, "dominos_reference", None),
         "sector_store": getattr(order, "sector_store", None),
+        "screenshot_url": getattr(order, "screenshot_url", None),
         "rider": rider_data,
         "items": [
             {

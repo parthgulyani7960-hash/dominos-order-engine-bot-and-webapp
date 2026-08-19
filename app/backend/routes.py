@@ -1650,6 +1650,63 @@ def get_admin_dashboard(db: Session = Depends(get_db), admin: User = Depends(get
         "users": users_result
     }
 
+async def notify_order_status_update(order, db: Session):
+    customer_user = db.query(User).filter(User.id == order.user_id).first()
+    if not customer_user:
+        return
+        
+    status_emojis = {
+        "Order Accepted": "✅",
+        "Preparing": "👩‍🍳",
+        "Out for Delivery": "🛵",
+        "Delivered": "📦",
+        "Completed": "🎉",
+        "Cancelled": "❌",
+        "Refunded": "💰"
+    }
+    emoji = status_emojis.get(order.status, "🔔")
+    msg_text = (
+        f"{emoji} <b>Order Status Update: {order.status}</b>\n\n"
+        f"Your order <code>{order.id}</code> has transitioned to: <b>{order.status}</b>.\n\n"
+        f"<b>Progress:</b>\n{get_order_progress_bar(order.status)}"
+    )
+    if order.status == "Out for Delivery":
+        msg_text += f"\n\nEstimated delivery: <code>{order.estimated_delivery.strftime('%I:%M %p') if order.estimated_delivery else 'soon'}</code>."
+    elif order.status == "Refunded":
+        msg_text += f"\n\nAn amount of <b>₹{order.total_payable:.2f}</b> has been credited back to your wallet."
+        
+    extra_details = []
+    if order.dominos_reference:
+        extra_details.append(f"🎫 <b>Domino's Ref No:</b> <code>{order.dominos_reference}</code>")
+    if order.rider:
+        extra_details.append(f"🏍️ <b>Rider:</b> {order.rider.rider_name} ({order.rider.rider_phone})")
+    if order.sector_store:
+        extra_details.append(f"🏪 <b>Store:</b> {order.sector_store}")
+    
+    if extra_details:
+        msg_text += "\n\n" + "\n".join(extra_details)
+        
+    markup = {
+        "inline_keyboard": [
+            [{"text": "🔄 Track Live Status", "callback_data": f"track_refresh_{order.id}"}],
+            [{"text": "💬 Contact Support", "url": "https://t.me/dominosordersHELP_bot"}]
+        ]
+    }
+    
+    # If screenshot_url is set, send a photo message
+    if order.screenshot_url:
+        photo_url = order.screenshot_url
+        if not photo_url.startswith("http"):
+            base_url = os.getenv("MINI_APP_URL", "http://localhost:8000")
+            # Ensure base_url has no trailing slash
+            if base_url.endswith("/"):
+                base_url = base_url[:-1]
+            photo_url = f"{base_url}{order.screenshot_url}"
+        await send_bot_photo(customer_user.telegram_id, photo_url, caption=msg_text, reply_markup=markup)
+    else:
+        await send_bot_message(customer_user.telegram_id, msg_text, reply_markup=markup)
+
+
 @router.put("/admin/orders/{order_id}/status")
 async def update_order_status(
     order_id: str,
@@ -1709,35 +1766,10 @@ async def update_order_status(
     )
     
     # Notify customer via Telegram Bot
-    customer_user = db.query(User).filter(User.id == order.user_id).first()
-    if customer_user:
-        status_emojis = {
-            "Order Accepted": "✅",
-            "Preparing": "👩‍🍳",
-            "Out for Delivery": "🛵",
-            "Delivered": "📦",
-            "Completed": "🎉",
-            "Cancelled": "❌",
-            "Refunded": "💰"
-        }
-        emoji = status_emojis.get(new_status, "🔔")
-        msg_text = (
-            f"{emoji} <b>Order Status Update: {new_status}</b>\n\n"
-            f"Your order <code>{order.id}</code> has transitioned to: <b>{new_status}</b>.\n\n"
-            f"<b>Progress:</b>\n{get_order_progress_bar(new_status)}"
-        )
-        if new_status == "Out for Delivery":
-            msg_text += f"\n\nEstimated delivery: <code>{order.estimated_delivery.strftime('%I:%M %p') if order.estimated_delivery else 'soon'}</code>."
-            
-        elif new_status == "Refunded":
-            msg_text += f"\n\nAn amount of <b>₹{order.total_payable:.2f}</b> has been credited back to your wallet."
-            
-        markup = {
-            "inline_keyboard": [
-                [{"text": "💬 Contact Support", "url": "https://t.me/dominosordersHELP_bot"}]
-            ]
-        }
-        await send_bot_message(customer_user.telegram_id, msg_text, reply_markup=markup)
+    try:
+        await notify_order_status_update(order, db)
+    except Exception as e:
+        logger.error(f"Failed to send Telegram status update: {e}")
         
     # Broadcast to app clients via SSE
     if sse_broadcast_callback:
@@ -2673,7 +2705,73 @@ async def update_order_details(
         request
     )
 
+    # Notify customer via Telegram Bot
+    try:
+        await notify_order_status_update(order, db)
+    except Exception as e:
+        logger.error(f"Failed to send Telegram status update: {e}")
+
+    # Broadcast to app clients via SSE
+    if sse_broadcast_callback:
+        await sse_broadcast_callback({"type": "order_update", "order_id": order.id, "status": order.status})
+
     return {"status": "success", "message": "Order details updated successfully"}
+
+
+@router.post("/admin/orders/{order_id}/screenshot")
+async def upload_order_screenshot(
+    order_id: str,
+    file: UploadFile = File(...),
+    request: Request = None,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin)
+):
+    """Upload a screenshot/image proof for an order and sync to client and Telegram."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # Validate file type
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image uploads are allowed")
+
+    # Save file to uploads folder
+    import uuid
+    ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+    filename = f"screenshot_{order.id}_{uuid.uuid4().hex[:8]}.{ext}"
+    
+    # Ensure uploads directory exists
+    from .main import UPLOAD_DIR
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    
+    filepath = os.path.join(UPLOAD_DIR, filename)
+    with open(filepath, "wb") as buffer:
+        import shutil
+        shutil.copyfileobj(file.file, buffer)
+
+    # Set local screenshot URL route path
+    screenshot_url = f"/uploads/{filename}"
+    order.screenshot_url = screenshot_url
+    db.commit()
+
+    # Log action
+    await log_admin_action(
+        db, admin.id, admin.username or "admin", "ORDER_SCREENSHOT_UPLOADED",
+        {"order_id": order_id, "screenshot_url": screenshot_url},
+        request
+    )
+
+    # Automatically notify customer via Telegram with the updated status & screenshot
+    try:
+        await notify_order_status_update(order, db)
+    except Exception as e:
+        logger.error(f"Failed to send screenshot update to Telegram: {e}")
+
+    # Broadcast to app clients via SSE
+    if sse_broadcast_callback:
+        await sse_broadcast_callback({"type": "order_update", "order_id": order.id, "status": order.status, "screenshot_url": screenshot_url})
+
+    return {"status": "success", "screenshot_url": screenshot_url}
 
 
 # ============================================================

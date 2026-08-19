@@ -940,6 +940,24 @@ function renderOrderDetailPanel(order) {
       </div>
     </div>
 
+    <!-- Screenshot / Image Proof -->
+    <div class="detail-section">
+      <h4>📷 Screenshot / Image Proof</h4>
+      ${order.screenshot_url ? `
+        <div style="margin-bottom:12px;border:1px solid rgba(255,255,255,0.1);border-radius:8px;overflow:hidden">
+          <img src="${order.screenshot_url}" style="width:100%;max-height:220px;object-fit:contain;background:#000" alt="Order Proof" />
+        </div>
+      ` : `
+        <div style="padding:20px;text-align:center;color:var(--text-muted);border:1px dashed rgba(255,255,255,0.15);border-radius:8px;margin-bottom:12px;font-size:13px">
+          No image proof uploaded yet
+        </div>
+      `}
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="file" id="detail-screenshot-file" class="form-control" style="font-size:11px;padding:3px" accept="image/*" />
+        <button class="btn btn-outline btn-sm" onclick="uploadOrderScreenshot('${order.id}')">Upload</button>
+      </div>
+    </div>
+
     <!-- Customer -->
     <div class="detail-section">
       <h4>Customer</h4>
@@ -1061,6 +1079,38 @@ async function updateOrderDetails(orderId) {
       body: JSON.stringify({ dominos_reference, sector_store })
     });
     showToast('Order details updated!', 'success');
+    await loadOrders();
+    openOrderDetail(orderId);
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+async function uploadOrderScreenshot(orderId) {
+  const fileInput = document.getElementById('detail-screenshot-file');
+  if (!fileInput || !fileInput.files.length) {
+    showToast('Please select an image file first', 'error');
+    return;
+  }
+  const file = fileInput.files[0];
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const token = getAdminToken();
+    const resp = await fetch(`/api/admin/orders/${orderId}/screenshot`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      body: formData
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || 'Upload failed');
+    }
+    const data = await resp.json();
+    showToast('Screenshot uploaded & synced!', 'success');
     await loadOrders();
     openOrderDetail(orderId);
   } catch (e) {
