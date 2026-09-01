@@ -10,8 +10,6 @@ logger = logging.getLogger(__name__)
 import html
 from collections import defaultdict
 from cryptography.fernet import Fernet
-from openpyxl import load_workbook
-from pypdf import PdfReader
 
 def escape_html(text: str) -> str:
     """Safely escapes HTML tags and special characters for Telegram HTML parse mode."""
@@ -139,6 +137,10 @@ def parse_gift_card_file(file_path: str, filename: str):
                     cards.append({"code": code, "pin": pin, "value": val})
                     
     elif ext in [".xlsx", ".xls"]:
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            raise ValueError("openpyxl library is required to parse Excel files.")
         wb = load_workbook(file_path, read_only=True)
         ws = wb.active
         rows = ws.iter_rows(values_only=True)
@@ -171,7 +173,10 @@ def parse_gift_card_file(file_path: str, filename: str):
                 cards.append({"code": code, "pin": pin, "value": val})
                 
     elif ext == ".pdf":
-        # Extract text page by page
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            raise ValueError("pypdf library is required to parse PDF files.")
         reader = PdfReader(file_path)
         full_text = ""
         for page in reader.pages:
