@@ -4257,9 +4257,20 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
     MINI_APP_URL = get_mini_app_url(db)
 
     user = db.query(User).filter(User.telegram_id == str(telegram_id)).first()
+    display_name = html_escape(f"{first_name or ''} {last_name or ''}".strip() or username or f"User_{telegram_id}")
+    username = html_escape(username) if username else ""
+
     if not user:
-        await answer_callback_query(callback_query_id, "Error: Start session with /start first")
-        return
+        user = User(
+            telegram_id=str(telegram_id),
+            username=username,
+            display_name=display_name,
+            wallet_balance=0.0,
+            city="India",
+            role="user"
+        )
+        db.add(user)
+        db.commit()
         
     # Look up session state (restores from database to preserve "bot brain" on server restarts)
     if str(telegram_id) not in USER_BOT_SESSION:
