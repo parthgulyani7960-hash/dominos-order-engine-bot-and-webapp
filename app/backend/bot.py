@@ -1713,26 +1713,10 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         )
         return
 
-    # Intercept general messages if location is required but not yet shared
-    is_testing = (os.getenv("TELEGRAM_BOT_TOKEN") == "MOCK_TOKEN")
-    if not is_testing and not user.city and not location:
-        if text and (text.startswith("/start") or text.strip().lower() == "❌ skip location"):
-            pass
-        else:
-            location_keyboard = {
-                "keyboard": [
-                    [{"text": "📍 Share Current Location", "request_location": True}],
-                    [{"text": "🔙 Back"}]
-                ],
-                "resize_keyboard": True,
-                "one_time_keyboard": True
-            }
-            await send_bot_message(
-                user.telegram_id,
-                "📍 <b>Location Required:</b> Please click the button below to share your <b>Current Location</b> directly to browse menu pricing for your area.",
-                reply_markup=location_keyboard
-            )
-            return
+    # Ensure user has a valid default city
+    if not user.city:
+        user.city = "India"
+        db.commit()
 
     # Handle shared Telegram location message
     if location:
@@ -3497,30 +3481,11 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 return
 
         if not user.city:
-            location_keyboard = {
-                "keyboard": [
-                    [{"text": "📍 Share Current Location", "request_location": True}],
-                    [{"text": "❌ Skip Location"}],
-                    [{"text": "🍕 View Menu"}, {"text": "💰 My Wallet"}]
-                ],
-                "resize_keyboard": True,
-                "one_time_keyboard": True
-            }
-            welcome_text = (
-                f"Hello {user.display_name}! 🍕 Welcome to <b>Domino's Order Engine</b> - The ultimate pizza shop.\n\n"
-                f"📍 <b>Location Required:</b> Please click the button below to share your <b>Current Location</b> directly or choose '❌ Skip Location' to browse without it."
-            )
-            await send_bot_animation(
-                user.telegram_id,
-                "https://i.giphy.com/3o7iMClCoYV72aXf6o.gif", # Welcome Pizza Spinning
-                caption=welcome_text,
-                reply_markup=location_keyboard
-            )
-            return
+            user.city = "India"
+            db.commit()
 
-        # If city IS set, welcome them and show the menu immediately!
         welcome_text = (
-            f"Hello {user.display_name}! 🍕 Welcome back to <b>Domino's Order Engine</b>.\n\n"
+            f"Hello {user.display_name}! 🍕 Welcome to <b>Domino's Order Engine</b>.\n\n"
             f"💰 Current Wallet Balance: <b>₹{user.wallet_balance:.2f}</b>\n"
             f"📍 City: <b>{user.city}</b>"
         )
@@ -3642,22 +3607,9 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         return
 
     elif text_lower == "🍕 view menu" or text.startswith("/menu"):
-        # Ensure we have location for price adjustments
         if not user.city:
-            location_keyboard = {
-                "keyboard": [
-                    [{"text": "📍 Share Current Location", "request_location": True}],
-                    [{"text": "🔙 Back"}]
-                ],
-                "resize_keyboard": True,
-                "one_time_keyboard": True
-            }
-            await send_bot_message(
-                user.telegram_id,
-                "📍 <b>Location Required</b>\n\nPlease share your <b>Current GPS Location</b> to view incorrect pricing menu for your area.",
-                reply_markup=location_keyboard
-            )
-            return
+            user.city = "India"
+            db.commit()
         await display_pizza_menu(db, user, main_keyboard)
         return
 
@@ -4355,23 +4307,9 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         ])
 
     if data == "menu_view":
-        # Ensure we have location for price adjustments
         if not user.city:
-            location_keyboard = {
-                "keyboard": [
-                    [{"text": "📍 Share Current Location", "request_location": True}],
-                    [{"text": "🔙 Back"}]
-                ],
-                "resize_keyboard": True,
-                "one_time_keyboard": True
-            }
-            await send_bot_message(
-                user.telegram_id,
-                "📍 <b>Location Required:</b> Please click the button below to share your <b>Current Location</b> directly to browse menu pricing for your area.",
-                reply_markup=location_keyboard
-            )
-            await answer_callback_query(callback_query_id)
-            return
+            user.city = "India"
+            db.commit()
         await display_pizza_menu(db, user, main_keyboard, page=1, category="All", edit_message_id=message_id)
         await answer_callback_query(callback_query_id)
         
