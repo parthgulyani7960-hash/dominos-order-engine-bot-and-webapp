@@ -903,7 +903,7 @@ def seed_database():
         # Seed essential default system configurations only
         default_configs = {
             "bot_fee": "10.0",
-            "upi_id": "pranjalnautry@fam",
+            "upi_id": "pranjalottery@fam",
             "upi_name": "Domino's Order Engine",
             "platform_name": "Domino's Order Engine",
         }
@@ -912,8 +912,8 @@ def seed_database():
             if not cfg:
                 cfg = SystemConfig(key=k, value=str(v))
                 db.add(cfg)
-            elif k == "upi_id" and cfg.value in ("dominos@upi", ""):
-                cfg.value = "pranjalnautry@fam"
+            elif k == "upi_id" and cfg.value in ("dominos@upi", "pranjalnautry@fam", ""):
+                cfg.value = "pranjalottery@fam"
         db.commit()
 
         # Seed default location pricing for major Indian cities

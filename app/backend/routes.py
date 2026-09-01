@@ -894,7 +894,7 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
         db.commit()
         upi_id_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
         upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
-        upi_id = upi_id_cfg.value if upi_id_cfg else "pranjalnautry@fam"
+        upi_id = upi_id_cfg.value if upi_id_cfg else "pranjalottery@fam"
         upi_name = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
         
         upi_details = generate_upi_qr_details(upi_id, upi_name, total_payable, order.id, f"Order {order.id}")
@@ -2130,7 +2130,7 @@ def get_system_config(db: Session = Depends(get_db), admin: User = Depends(get_c
         "cart_promo_max": float(configs.get("cart_promo_max", 220.0)),
         "cart_promo_fixed": float(configs.get("cart_promo_fixed", 100.0)),
         "bot_fee": float(configs.get("bot_fee", 10.0)),
-        "upi_id": configs.get("upi_id", "pranjalnautry@fam"),
+        "upi_id": configs.get("upi_id", "pranjalottery@fam"),
         "upi_name": configs.get("upi_name", "Domino's Order Engine"),
         "platform_name": configs.get("platform_name", "Domino's Order Engine"),
 
@@ -2429,7 +2429,7 @@ def get_public_config(db: Session = Depends(get_db)):
         "cart_promo_max": float(configs.get("cart_promo_max", 220.0)),
         "cart_promo_fixed": float(configs.get("cart_promo_fixed", 100.0)),
         "bot_fee": float(configs.get("bot_fee", 10.0)),
-        "upi_id": configs.get("upi_id", "pranjalnautry@fam"),
+        "upi_id": configs.get("upi_id", "pranjalottery@fam"),
         "upi_name": configs.get("upi_name", "Domino's Order Engine"),
         "platform_name": configs.get("platform_name", "Domino's Order Engine"),
         "mini_app_url": configs.get("mini_app_url", ""),
@@ -4536,7 +4536,7 @@ def generate_manual_qr(payload: ManualQRRequest, db: Session = Depends(get_db), 
     upi_id_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
     upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
     
-    upi_id = upi_id_cfg.value if upi_id_cfg else "pranjalnautry@fam"
+    upi_id = upi_id_cfg.value if upi_id_cfg else "pranjalottery@fam"
     upi_name = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
     
     label = payload.label or "Manual Payment"
