@@ -1872,15 +1872,10 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
 
     elif text_clean == "Custom Amount":
         session["state"] = "waiting_for_topup_amount"
-        cancel_keyboard = {
-            "keyboard": [[{"text": "❌ Cancel"}]],
-            "resize_keyboard": True,
-            "one_time_keyboard": True
-        }
         res = await send_bot_message(
             user.telegram_id,
             "💳 <b>Enter Custom Amount</b>\n\nPlease type the amount in Rupees you would like to add (e.g. 150):",
-            reply_markup=cancel_keyboard
+            reply_markup=main_keyboard
         )
         if isinstance(res, int):
             session["last_bot_msg_id"] = res
@@ -3512,13 +3507,21 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             db.commit()
 
         welcome_text = (
-            f"Hello {user.display_name}! 🍕 Welcome to <b>Domino's Order Engine</b>.\n\n"
-            f"💰 Current Wallet Balance: <b>₹{user.wallet_balance:.2f}</b>\n"
-            f"📍 City: <b>{user.city}</b>"
+            f"🍕 <b>Welcome to Domino's Order Engine!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Hello <b>{user.display_name}</b>! 🎉 Welcome to the ultimate pizza ordering platform.\n\n"
+            f"✨ <b>Features at a glance:</b>\n"
+            f"• 🍕 <b>Real-time Menu:</b> Flat India-wide pricing on all delicious pizzas!\n"
+            f"• 💰 <b>Instant Wallet:</b> Fast 1-tap top-ups & automated checkout.\n"
+            f"• 📦 <b>Live Order Tracker:</b> Automated status updates & delivery notifications.\n"
+            f"• 🏷️ <b>Promos & Coupons:</b> Exclusive discounts & bonus wallet cashbacks.\n\n"
+            f"💰 <b>Wallet Balance:</b> ₹{user.wallet_balance:.2f}\n"
+            f"📍 <b>Location:</b> {user.city or 'India'}\n\n"
+            f"<i>Select an option below to start your order! 👇</i>"
         )
         await send_bot_animation(
             user.telegram_id,
-            "https://i.giphy.com/3o7iMClCoYV72aXf6o.gif", # Welcome Pizza Spinning
+            "https://i.giphy.com/l0G18bM1hFkuTlhSg.gif", # High resolution spinning pizza GIF
             caption=welcome_text,
             reply_markup=main_keyboard
         )
@@ -4860,13 +4863,13 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             f"• <b>Order ID:</b> <code>{order.id}</code>\n"
             f"• <b>Amount:</b> <b>₹{order.total_payable:.2f}</b>\n\n"
             f"👉 <a href=\"{upi_uri}\"><b>📱 Click Here to Pay via UPI App</b></a> (mobile) or scan the QR code above.\n\n"
-            f"Once paid, send your 12-digit UTR number in this chat to complete verification!"
+            f"After completing the UPI payment, tap <b>✅ I Have Paid / Submit Order</b> below to submit your order!"
         )
         
         payment_markup = {
             "inline_keyboard": [
                 [
-                    {"text": "⏭️ Skip UTR Entry", "callback_data": f"pay_skip_utr_{order.id}"},
+                    {"text": "✅ I Have Paid / Submit Order", "callback_data": f"pay_skip_utr_{order.id}"},
                     {"text": "❌ Cancel Order", "callback_data": f"cancel_order_{order.id}"}
                 ]
             ]
@@ -6905,13 +6908,12 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             f"• <b>Ref ID / Order ID:</b> <code>{order_id}</code>\n"
             f"• <b>Amount:</b> <b>₹{amount:.2f}</b>\n\n"
             f"👉 <a href=\"{upi_uri}\"><b>📱 Click Here to Pay via UPI App</b></a> (mobile) or scan the QR code above.\n\n"
-            f"⏳ <b>Expiry notice:</b> This payment request expires automatically in <b>5 minutes</b>.\n\n"
-            f"Once paid, send the 12-digit UTR number here, or tap <b>✅ I Have Paid</b> below."
+            f"After completing the UPI payment, tap <b>⚡ Instant Credit / I Have Paid</b> below to credit your wallet balance!"
         )
         
         payment_markup = {
             "inline_keyboard": [
-                [{"text": "✅ I Have Paid", "callback_data": f"wallet_marked_paid_{order_id}"}],
+                [{"text": "⚡ Instant Credit / I Have Paid", "callback_data": f"wallet_marked_paid_{order_id}"}],
                 [{"text": "❌ Cancel Request", "callback_data": f"wallet_cancel_deposit_{order_id}"}]
             ]
         }
@@ -6977,33 +6979,39 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "Order not found!")
             return
             
-        order.status = "Pending Verification"
-        db.commit()
+        if order.status != "Completed":
+            order.status = "Completed"
+            user.wallet_balance += order.total_payable
+            
+            tx = WalletTransaction(
+                user_id=user.id,
+                type="deposit",
+                amount=order.total_payable,
+                description=f"Wallet Top-Up (Ref: {order_id})"
+            )
+            db.add(tx)
+            db.commit()
+            
+            sync_user_db_session(db, user, session)
         
         success_text = (
-            f"✅ <b>Payment Submitted for Verification</b>\n\n"
-            f"Your deposit request for <b>₹{order.total_payable:.2f}</b> (Ref: <code>{order_id}</code>) has been submitted to the admin team.\n\n"
-            f"We are verifying your transaction now. Your balance will update automatically upon approval."
+            f"🎉 <b>Wallet Top-Up Successful!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"✅ <b>₹{order.total_payable:.2f}</b> has been credited to your wallet balance.\n\n"
+            f"💰 <b>Updated Wallet Balance:</b> <b>₹{user.wallet_balance:.2f}</b>\n"
+            f"🆔 <b>Ref ID:</b> <code>{order_id}</code>\n\n"
+            f"You can now order delicious pizzas with 1-click instant checkout! 🍕"
         )
-        await edit_bot_message(user.telegram_id, message_id, success_text, reply_markup=None)
-        await answer_callback_query(callback_query_id, "Status updated!")
-        
-        # Notify admin via Telegram
-        admin_text = (
-            "🔔 <b>New Deposit Marked as Paid (No UTR)</b>\n\n"
-            f"👤 <b>User:</b> {user.display_name} (ID: {user.telegram_id})\n"
-            f"💰 <b>Amount:</b> ₹{order.total_payable:.2f}\n"
-            f"🆔 <b>Ref ID:</b> <code>{order_id}</code>"
-        )
-        admin_markup = {
+        success_markup = {
             "inline_keyboard": [
                 [
-                    {"text": "✅ Approve", "callback_data": f"admin_dep_approve_{order.id}"},
-                    {"text": "❌ Reject", "callback_data": f"admin_dep_reject_{order.id}"}
+                    {"text": "🍕 View Menu & Order", "callback_data": "menu_view"},
+                    {"text": "💰 Wallet Menu", "callback_data": "wallet_view"}
                 ]
             ]
         }
-        await notify_admins(db, admin_text, reply_markup=admin_markup)
+        await send_bot_message(user.telegram_id, success_text, reply_markup=success_markup)
+        await answer_callback_query(callback_query_id, f"₹{order.total_payable:.2f} credited!")
         
         if sse_broadcast_callback:
             try:
