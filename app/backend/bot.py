@@ -2491,12 +2491,26 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         return
 
     elif session.get("state") == "waiting_for_topup_amount":
+        if text_clean.lower() in ("cancel", "❌ cancel", "back", "🔙 back", "main menu", "🍕 view menu", "💰 my wallet", "📍 change location", "📦 track orders", "💬 contact support"):
+            session["state"] = None
+            session["topup_amount"] = None
+            await send_bot_message(
+                user.telegram_id,
+                "❌ <b>Deposit request cancelled.</b>\n\nReturning to main menu.",
+                reply_markup=main_keyboard
+            )
+            return
+
         try:
             amount = float(text_clean)
             if amount <= 0:
                 raise ValueError()
         except ValueError:
-            await send_bot_message(user.telegram_id, "❌ Please enter a valid positive number for the amount (e.g. 200, 500).")
+            await send_bot_message(
+                user.telegram_id,
+                "❌ <b>Invalid Amount!</b>\n\nPlease enter a valid positive number for the amount (e.g. 200, 500) or send /cancel to return.",
+                reply_markup={"keyboard": [[{"text": "❌ Cancel"}]], "resize_keyboard": True, "one_time_keyboard": True}
+            )
             return
             
         session["state"] = None
@@ -7135,6 +7149,8 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await answer_callback_query(callback_query_id, "Order cancelled!")
 
     elif data == "wallet_cancel_deposit_unconfirmed":
+        session["state"] = None
+        session["topup_amount"] = None
         cancel_text = (
             "❌ <b>Deposit Request Cancelled</b>\n\n"
             "The deposit request has been cancelled successfully. No funds have been added."
