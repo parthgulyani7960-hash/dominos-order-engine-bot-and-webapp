@@ -451,6 +451,15 @@ def seed_database():
                 "size_options": ["Regular"]
             },
             {
+                "name": "Veg Loaded Pizza Mania",
+                "price": 89.0,
+                "description": "Tomato, jalapeno, corn & grilled mushroom",
+                "is_veg": True,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+            {
                 "name": "Paneer n Onion Pizza Mania",
                 "price": 99.0,
                 "description": "Chunky paneer and crunchy onion",
@@ -464,6 +473,24 @@ def seed_database():
                 "price": 99.0,
                 "description": "Loaded with extra creamy liquid cheese",
                 "is_veg": True,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Non-Veg Loaded Pizza Mania",
+                "price": 99.0,
+                "description": "Pepper barbecue chicken & spicy chicken sausage",
+                "is_veg": False,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Chicken Sausage Pizza Mania",
+                "price": 99.0,
+                "description": "Spicy chicken sausage with mozzarella cheese",
+                "is_veg": False,
                 "category": "Mania",
                 "crust_options": ["Classic Hand Tossed"],
                 "size_options": ["Regular"]

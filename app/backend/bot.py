@@ -1175,7 +1175,7 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
     nav_row = []
     if page > 1:
         nav_row.append({"text": "⬅️ Prev", "callback_data": f"menu_page_{page-1}_{category}"})
-    nav_row.append({"text": f"📄 {page}/{total_pages}", "callback_data": "menu_page_noop"})
+    nav_row.append({"text": f"📄 {page}/{total_pages}", "callback_data": f"menu_noop_{page}_{total_pages}_{category}"})
     if page < total_pages:
         nav_row.append({"text": "Next ➡️", "callback_data": f"menu_page_{page+1}_{category}"})
     grid.append(nav_row)
@@ -3515,8 +3515,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             caption=welcome_text,
             reply_markup=main_keyboard
         )
-        # Automatically display the menu
-        await display_pizza_menu(db, user, main_keyboard)
+        return
     elif text_lower.startswith("/verify"):
         parts = text.split(" ")
         if len(parts) < 2:
@@ -4352,8 +4351,13 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await display_pizza_menu(db, user, main_keyboard, page=1, category="All", edit_message_id=message_id)
         await answer_callback_query(callback_query_id)
         
-    elif data == "menu_page_noop":
-        await answer_callback_query(callback_query_id)
+    elif data.startswith("menu_noop_") or data == "menu_page_noop":
+        parts = data.split("_")
+        if len(parts) >= 4:
+            p_num, p_tot, p_cat = parts[2], parts[3], parts[4]
+            await answer_callback_query(callback_query_id, f"📄 Page {p_num} of {p_tot} ({p_cat})")
+        else:
+            await answer_callback_query(callback_query_id, "📄 Page Indicator")
         return
         
     elif data.startswith("menu_page_"):
