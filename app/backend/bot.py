@@ -5957,16 +5957,24 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id)
             return
 
-        msg = "📦 <b>Pending Pizza Orders Control Panel:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        msg = "📦 <b>Pending Pizza Orders Control Panel</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
         buttons = []
         for o in pending_orders:
-            u_name = o.user.display_name if o.user else f"User {o.user_id}"
-            addr_brief = (o.address or "Address pending")[:30]
+            u_name = o.user.display_name if o.user else f"User_{o.user_id}"
+            u_tg_id = o.user.telegram_id if o.user else o.user_id
+            phone_num = o.phone or "Not provided"
+            full_addr = (o.address or "Address pending").strip()
+            items_str = "  • " + ", ".join([f"{it.quantity}x {it.product_name}" for it in o.items]) if o.items else "  • Pizza Order Items"
+            
             msg += (
-                f"• <b>{o.id}</b> — <b>₹{o.total_payable:.2f}</b>\n"
-                f"  👤 {u_name} | 📱 {o.phone or 'N/A'}\n"
-                f"  🏡 {addr_brief}...\n"
-                f"  Status: <code>{o.status}</code>\n\n"
+                f"🍕 <b>Order ID:</b> <code>{o.id}</code>\n"
+                f"👤 <b>Customer:</b> <b>{u_name}</b> (ID: <code>{u_tg_id}</code>)\n"
+                f"📱 <b>Phone:</b> <code>{phone_num}</code>\n"
+                f"🏡 <b>Location:</b> <code>{full_addr}</code>\n"
+                f"📦 <b>Items:</b>\n{items_str}\n"
+                f"💰 <b>Total Bill:</b> <b>₹{o.total_payable:.2f}</b> (Paid via: <b>{(o.payment_method or 'wallet').upper()}</b>)\n"
+                f"🏷️ <b>Status:</b> <code>{o.status}</code>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             )
             buttons.append([
                 {"text": f"✅ Complete ({o.id[-6:]})", "callback_data": f"admin_act_complete_{o.id}"},
@@ -6026,16 +6034,24 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             Order.status.in_(["Paid", "Pending Payment", "Pending Verification", "Order Processing"]),
             ~Order.id.like("TOPUP-%")
         ).order_by(Order.created_at.desc()).limit(10).all()
-        msg = "📦 <b>Pending Pizza Orders Control Panel:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        msg = "📦 <b>Pending Pizza Orders Control Panel</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
         buttons = []
         for o in pending_orders:
-            u_name = o.user.display_name if o.user else f"User {o.user_id}"
-            addr_brief = (o.address or "Address pending")[:30]
+            u_name = o.user.display_name if o.user else f"User_{o.user_id}"
+            u_tg_id = o.user.telegram_id if o.user else o.user_id
+            phone_num = o.phone or "Not provided"
+            full_addr = (o.address or "Address pending").strip()
+            items_str = "  • " + ", ".join([f"{it.quantity}x {it.product_name}" for it in o.items]) if o.items else "  • Pizza Order Items"
+            
             msg += (
-                f"• <b>{o.id}</b> — <b>₹{o.total_payable:.2f}</b>\n"
-                f"  👤 {u_name} | 📱 {o.phone or 'N/A'}\n"
-                f"  🏡 {addr_brief}...\n"
-                f"  Status: <code>{o.status}</code>\n\n"
+                f"🍕 <b>Order ID:</b> <code>{o.id}</code>\n"
+                f"👤 <b>Customer:</b> <b>{u_name}</b> (ID: <code>{u_tg_id}</code>)\n"
+                f"📱 <b>Phone:</b> <code>{phone_num}</code>\n"
+                f"🏡 <b>Location:</b> <code>{full_addr}</code>\n"
+                f"📦 <b>Items:</b>\n{items_str}\n"
+                f"💰 <b>Total Bill:</b> <b>₹{o.total_payable:.2f}</b> (Paid via: <b>{(o.payment_method or 'wallet').upper()}</b>)\n"
+                f"🏷️ <b>Status:</b> <code>{o.status}</code>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             )
             buttons.append([
                 {"text": f"✅ Complete ({o.id[-6:]})", "callback_data": f"admin_act_complete_{o.id}"},
@@ -6086,16 +6102,24 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             Order.status.in_(["Paid", "Pending Payment", "Pending Verification", "Order Processing"]),
             ~Order.id.like("TOPUP-%")
         ).order_by(Order.created_at.desc()).limit(10).all()
-        msg = "📦 <b>Pending Pizza Orders Control Panel:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        msg = "📦 <b>Pending Pizza Orders Control Panel</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
         buttons = []
         for o in pending_orders:
-            u_name = o.user.display_name if o.user else f"User {o.user_id}"
-            addr_brief = (o.address or "Address pending")[:30]
+            u_name = o.user.display_name if o.user else f"User_{o.user_id}"
+            u_tg_id = o.user.telegram_id if o.user else o.user_id
+            phone_num = o.phone or "Not provided"
+            full_addr = (o.address or "Address pending").strip()
+            items_str = "  • " + ", ".join([f"{it.quantity}x {it.product_name}" for it in o.items]) if o.items else "  • Pizza Order Items"
+            
             msg += (
-                f"• <b>{o.id}</b> — <b>₹{o.total_payable:.2f}</b>\n"
-                f"  👤 {u_name} | 📱 {o.phone or 'N/A'}\n"
-                f"  🏡 {addr_brief}...\n"
-                f"  Status: <code>{o.status}</code>\n\n"
+                f"🍕 <b>Order ID:</b> <code>{o.id}</code>\n"
+                f"👤 <b>Customer:</b> <b>{u_name}</b> (ID: <code>{u_tg_id}</code>)\n"
+                f"📱 <b>Phone:</b> <code>{phone_num}</code>\n"
+                f"🏡 <b>Location:</b> <code>{full_addr}</code>\n"
+                f"📦 <b>Items:</b>\n{items_str}\n"
+                f"💰 <b>Total Bill:</b> <b>₹{o.total_payable:.2f}</b> (Paid via: <b>{(o.payment_method or 'wallet').upper()}</b>)\n"
+                f"🏷️ <b>Status:</b> <code>{o.status}</code>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             )
             buttons.append([
                 {"text": f"✅ Complete ({o.id[-6:]})", "callback_data": f"admin_act_complete_{o.id}"},
@@ -6124,13 +6148,19 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id)
             return
 
-        msg = "🏦 <b>Pending Deposit Requests:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        msg = "🏦 <b>Pending Wallet Deposit Requests</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
         buttons = []
         for o in pending_deps:
-            u_name = o.user.display_name if o.user else f"User {o.user_id}"
+            u_name = o.user.display_name if o.user else f"User_{o.user_id}"
+            u_tg_id = o.user.telegram_id if o.user else o.user_id
+            utr_ref = o.transaction_id or "Auto-Verification"
             msg += (
-                f"• <b>{o.id}</b> — <b>₹{o.total_payable:.2f}</b>\n"
-                f"  👤 {u_name} (ID: <code>{o.user.telegram_id if o.user else o.user_id}</code>) | Status: <code>{o.status}</code>\n\n"
+                f"💳 <b>Deposit ID:</b> <code>{o.id}</code>\n"
+                f"👤 <b>User:</b> <b>{u_name}</b> (Telegram ID: <code>{u_tg_id}</code>)\n"
+                f"💵 <b>Amount to Credit:</b> <b>₹{o.total_payable:.2f}</b>\n"
+                f"🔢 <b>UTR / Transaction Ref:</b> <code>{utr_ref}</code>\n"
+                f"🏷️ <b>Status:</b> <code>{o.status}</code>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             )
             buttons.append([
                 {"text": f"✅ Approve ₹{o.total_payable:.0f} ({o.id[-6:]})", "callback_data": f"admin_dep_approve_{o.id}"},
@@ -7625,7 +7655,7 @@ async def process_bot_callback_task(telegram_id: str, first_name: str, last_name
                 db.commit()
             except Exception:
                 db.rollback()
-            # 3. Broadcast to admin SSE Live Feed
+            # 3. Broadcast to admin SSE Live Feed & Telegram Admin Alert
             if sse_broadcast_callback:
                 try:
                     await sse_broadcast_callback({
@@ -7634,6 +7664,19 @@ async def process_bot_callback_task(telegram_id: str, first_name: str, last_name
                     })
                 except Exception:
                     pass
+            try:
+                admin_alert_text = (
+                    "⚠️ <b>Bot Exception Alert</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"<b>Type:</b> Callback Query Error\n"
+                    f"<b>User:</b> {first_name} (ID: <code>{telegram_id}</code>)\n"
+                    f"<b>Data:</b> <code>{data}</code>\n"
+                    f"<b>Error:</b> <code>{html_escape(str(e))}</code>\n\n"
+                    "<i>Log saved to DB ErrorLog.</i>"
+                )
+                asyncio.create_task(notify_admins(db, admin_alert_text))
+            except Exception:
+                pass
             # Always answer the callback so the button doesn't freeze
             try:
                 await answer_callback_query(callback_query_id, "Action completed. Please refresh or try again if needed.")
@@ -7700,7 +7743,7 @@ async def process_incoming_message_task(telegram_id: str, first_name: str, last_
                 db.commit()
             except Exception:
                 db.rollback()
-            # 3. Broadcast to admin SSE Live Feed
+            # 3. Broadcast to admin SSE Live Feed & Telegram Admin Alert
             if sse_broadcast_callback:
                 try:
                     await sse_broadcast_callback({
@@ -7709,6 +7752,19 @@ async def process_incoming_message_task(telegram_id: str, first_name: str, last_
                     })
                 except Exception:
                     pass
+            try:
+                admin_alert_text = (
+                    "⚠️ <b>Bot Exception Alert</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"<b>Type:</b> Message Handler Error\n"
+                    f"<b>User:</b> {first_name} (ID: <code>{telegram_id}</code>)\n"
+                    f"<b>Text:</b> <code>{html_escape(repr(text[:100]))}</code>\n"
+                    f"<b>Error:</b> <code>{html_escape(str(e))}</code>\n\n"
+                    "<i>Log saved to DB ErrorLog.</i>"
+                )
+                asyncio.create_task(notify_admins(db, admin_alert_text))
+            except Exception:
+                pass
         finally:
             db.close()
 
