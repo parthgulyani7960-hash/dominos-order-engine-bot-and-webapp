@@ -1465,6 +1465,24 @@ async def initiate_checkout(db: Session, user: User, session: dict, edit_message
         return
 
 
+def sync_user_db_session(db: Session, user: User, session: dict):
+    """
+    Persists in-memory session changes (cart, active state) directly into the database
+    so that state updates are 100% immediate, live, and survived across server/session restarts
+    without requiring the user to re-run /start.
+    """
+    if not user or session is None:
+        return
+    try:
+        import json
+        user.bot_state = session.get("state")
+        user.bot_cart = json.dumps(session.get("cart", {}))
+        db.commit()
+    except Exception as e:
+        logger.error(f"[DB Session Sync Error] {e}")
+        db.rollback()
+
+
 async def handle_bot_message(db: Session, telegram_id: str, first_name: str, last_name: str, username: str, text: str, location: dict = None, message_id: int = None, photo: list = None, document: dict = None):
     """
     Handles an incoming message sent to the Telegram bot with custom keyboards, commands, and looping GIFs.
@@ -1485,6 +1503,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             username=username,
             display_name=display_name,
             wallet_balance=0.0,
+            city="India",
             role="user"
         )
         db.add(user)
@@ -1530,19 +1549,27 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
     # Sync profile photo asynchronously in background
     asyncio.create_task(sync_user_profile_photo(str(telegram_id), str(user.id)))
 
-    # Look up session state (restores from database to preserve "bot brain" on server restarts)
+    # Restore or sync session state live from DB
+    import json
+    saved_cart = {}
+    if user.bot_cart:
+        try:
+            saved_cart = json.loads(user.bot_cart)
+        except Exception:
+            pass
+
     if str(telegram_id) not in USER_BOT_SESSION:
-        import json
-        saved_cart = {}
-        if user.bot_cart:
-            try:
-                saved_cart = json.loads(user.bot_cart)
-            except Exception:
-                pass
         USER_BOT_SESSION[str(telegram_id)] = {
             "state": user.bot_state,
             "cart": saved_cart
         }
+    else:
+        session = USER_BOT_SESSION[str(telegram_id)]
+        if user.bot_state is not None:
+            session["state"] = user.bot_state
+        if saved_cart:
+            session["cart"] = saved_cart
+
     session = USER_BOT_SESSION[str(telegram_id)]
 
     is_media = (photo is not None) or (document is not None)
@@ -4272,19 +4299,27 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         db.add(user)
         db.commit()
         
-    # Look up session state (restores from database to preserve "bot brain" on server restarts)
+    # Restore or sync session state live from DB
+    import json
+    saved_cart = {}
+    if user.bot_cart:
+        try:
+            saved_cart = json.loads(user.bot_cart)
+        except Exception:
+            pass
+
     if str(telegram_id) not in USER_BOT_SESSION:
-        import json
-        saved_cart = {}
-        if user.bot_cart:
-            try:
-                saved_cart = json.loads(user.bot_cart)
-            except Exception:
-                pass
         USER_BOT_SESSION[str(telegram_id)] = {
             "state": user.bot_state,
             "cart": saved_cart
         }
+    else:
+        session = USER_BOT_SESSION[str(telegram_id)]
+        if user.bot_state is not None:
+            session["state"] = user.bot_state
+        if saved_cart:
+            session["cart"] = saved_cart
+
     session = USER_BOT_SESSION[str(telegram_id)]
     
     # If the user clicks any inline button, clear any active text input states
