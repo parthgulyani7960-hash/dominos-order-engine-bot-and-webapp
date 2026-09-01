@@ -1069,17 +1069,13 @@ async def display_delivery_location_menu(db: Session, user: User):
 
 async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: int = 1, category: str = "All", edit_message_id: int = None):
     """Displays the menu containing all pizzas as rich text with full pricing, types, and category filters."""
-    # Determine pricing multiplier and delivery charge based on user's location
     multiplier = 1.0
-    delivery_charge = 30.0
     loc = None
     if user.city:
         loc = db.query(LocationPricing).filter(LocationPricing.city.ilike(user.city)).first()
     if loc:
         multiplier = loc.price_multiplier
-        delivery_charge = loc.delivery_charge
 
-    # Fetch all active products
     query = db.query(Product).filter(Product.availability == True)
     if category != "All":
         if category.lower() in ("veg", "non-veg"):
@@ -1092,7 +1088,7 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
     if not products:
         empty_text = (
             f"🍽️ <b>No items found in '{category}'</b>\n\n"
-            f"Try a different category or tap <b>⭐ All</b> to see everything."
+            f"Try selecting a different category or tap <b>⭐ All Categories</b> below."
         )
         back_markup = {"inline_keyboard": [
             [{"text": "⭐ All Categories", "callback_data": "menu_category_All"}],
@@ -1104,10 +1100,8 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
             await send_bot_message(user.telegram_id, empty_text, reply_markup=back_markup)
         return
 
-    # Generate mappings to get 1-based display codes
     code_to_id, id_to_code = get_product_mappings(db)
 
-    # Pagination: 5 items per page
     items_per_page = 5
     total_pages = (len(products) + items_per_page - 1) // items_per_page
     page = max(1, min(page, total_pages))
@@ -1115,79 +1109,69 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
     start_idx = (page - 1) * items_per_page
     page_products = products[start_idx:start_idx + items_per_page]
 
-    # Category emoji map
     category_emoji = {
-        "veg": "🟢", "non-veg": "🔴", "sides": "🍟",
-        "drinks": "🥤", "desserts": "🍰", "all": "🍕"
+        "veg": "🟢 Veg", "non-veg": "🔴 Non-Veg", "sides": "🍟 Sides",
+        "drinks": "🥤 Drinks", "desserts": "🍰 Desserts", "mania": "🍕 Pizza Mania", "all": "🍕 All Items"
     }
-    cat_icon = category_emoji.get(category.lower(), "🍽️")
+    cat_label = category_emoji.get(category.lower(), f"🍽️ {category}")
 
-    # Compose header
-    city_display = f"📍 <b>{user.city}</b>" if user.city else "📍 <i>Location not set</i>"
-    price_note = f" · {multiplier:.1f}x pricing" if multiplier != 1.0 else ""
+    city_display = f"📍 <b>{user.city}</b>" if user.city else "📍 <b>India</b>"
     
     menu_lines = [
-        f"🍕 <b>Domino's Menu</b>  —  {cat_icon} <b>{category}</b>",
-        f"{city_display}{price_note}",
-        f"📄 Page {page} of {total_pages}  ·  {len(products)} items",
+        f"🍕 <b>DOMINO'S PIZZA MENU</b>",
+        f"━━━━━━━━━━━━━━━━━━━━━━",
+        f"{city_display}  ·  Category: <b>{cat_label}</b>",
+        f"📄 Page <b>{page}/{total_pages}</b> ({len(products)} items available)",
         "━━━━━━━━━━━━━━━━━━━━━━\n"
     ]
 
     for p in page_products:
         original = float(round(p.original_price * multiplier))
-        if p.discounted_price is not None:
-            effective = float(round(p.discounted_price * multiplier))
-        else:
-            effective = original
+        effective = float(round(p.discounted_price * multiplier)) if p.discounted_price is not None else original
 
         veg_dot = "🟢" if p.is_veg else "🔴"
         display_code = id_to_code.get(p.id, "—")
         
-        # Price display: show strikethrough original if discounted
         if p.discounted_price is not None and p.discounted_price < p.original_price:
-            price_str = f"<s>₹{original:.0f}</s>  <b>₹{effective:.0f}</b>"
-            savings = original - effective
-            price_str += f"  <i>(Save ₹{savings:.0f}!)</i>"
+            price_str = f"<s>₹{original:.0f}</s> <b>₹{effective:.0f}</b> <i>(Save ₹{original-effective:.0f}!)</i>"
         else:
             price_str = f"<b>₹{effective:.0f}</b>"
 
         badges = []
         if p.is_popular:
-            badges.append("🔥 Popular")
+            badges.append("🔥 Best Seller")
         if p.is_recommended:
-            badges.append("⭐ Chef's Pick")
-        badge_str = "  " + "  ".join(badges) if badges else ""
+            badges.append("⭐ Chef Pick")
+        badge_str = "  " + " ".join(badges) if badges else ""
 
         menu_lines.append(
             f"{veg_dot} <b>[{display_code}] {p.name}</b>{badge_str}\n"
-            f"     📁 {p.category}  ·  {price_str}\n"
-            f"     <i>{(p.description or 'Freshly made at your nearest Domino\'s store.')[:90]}</i>"
+            f"   💰 Price: {price_str}\n"
+            f"   📝 <i>{(p.description or 'Freshly prepared Domino\'s pizza with 100% mozzarella cheese.')[:85]}</i>"
         )
 
-    # Delivery info footer
     menu_lines.append(
-        f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🚚 Delivery via Domino's  ·  🤖 Bot fee applies"
+        "\n━━━━━━━━━━━━━━━━━━━━━━\n"
+        "💡 <i>Tap any item button below to add to your cart!</i>"
     )
 
     menu_text = "\n\n".join(menu_lines)
 
-    # Build inline keyboard: add-to-cart buttons in 2-column layout
+    # Inline add-to-cart grid
     grid = []
     row = []
     for p in page_products:
-        original = float(round(p.original_price * multiplier))
-        effective = float(round(p.discounted_price * multiplier)) if p.discounted_price is not None else original
-        name_limit = p.name[:16] + "…" if len(p.name) > 18 else p.name
+        effective = float(round(p.discounted_price * multiplier)) if p.discounted_price is not None else float(round(p.original_price * multiplier))
+        name_limit = p.name[:14] + "…" if len(p.name) > 16 else p.name
         veg_icon = "🟢" if p.is_veg else "🔴"
-        row.append({"text": f"➕ {veg_icon} {name_limit} ₹{effective:.0f}", "callback_data": f"cart_add_{p.id}"})
+        row.append({"text": f"➕ {veg_icon} {name_limit} (₹{effective:.0f})", "callback_data": f"cart_add_{p.id}"})
         if len(row) == 2:
             grid.append(row)
             row = []
     if row:
         grid.append(row)
 
-    # Pagination row
+    # Navigation row
     nav_row = []
     if page > 1:
         nav_row.append({"text": "⬅️ Prev", "callback_data": f"menu_page_{page-1}_{category}"})
@@ -1196,7 +1180,7 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
         nav_row.append({"text": "Next ➡️", "callback_data": f"menu_page_{page+1}_{category}"})
     grid.append(nav_row)
 
-    # Category filter row
+    # Category filters
     grid.append([
         {"text": "⭐ All",       "callback_data": "menu_category_All"},
         {"text": "🟢 Veg",      "callback_data": "menu_category_Veg"},
@@ -1208,7 +1192,13 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
         {"text": "🥤 Drinks",   "callback_data": "menu_category_Drinks"},
         {"text": "🍰 Desserts", "callback_data": "menu_category_Desserts"}
     ])
-    grid.append([{"text": "🛒 View Shopping Cart", "callback_data": "cart_view"}])
+
+    # Cart button with live count
+    session = USER_BOT_SESSION.get(str(user.telegram_id), {})
+    cart = session.get("cart", {})
+    cart_count = sum(cart.values()) if isinstance(cart, dict) else 0
+    cart_label = f"🛒 View Shopping Cart ({cart_count} items)" if cart_count > 0 else "🛒 View Shopping Cart (Empty)"
+    grid.append([{"text": cart_label, "callback_data": "cart_view"}])
 
     markup = {"inline_keyboard": grid}
 
