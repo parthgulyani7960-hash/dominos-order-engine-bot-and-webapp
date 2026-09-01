@@ -32,6 +32,9 @@ DATABASE_URL: str = os.getenv(
     "DATABASE_URL",
     f"sqlite:///{os.path.join(DATA_DIR, 'pizza.db')}",
 )
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 _IS_SQLITE: bool = DATABASE_URL.startswith("sqlite")
 _connect_args: dict = {"check_same_thread": False, "timeout": 60} if _IS_SQLITE else {}
 
