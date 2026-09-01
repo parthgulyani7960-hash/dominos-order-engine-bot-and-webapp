@@ -231,198 +231,16 @@ def seed_database():
         db.commit()
 
         DOMINOS_MENU_CATALOG = [
-            # Veg Pizzas (Regular Base Price)
+            # --- PIZZA MANIA ---
             {
-                "name": "Margherita",
-                "price": 109.0,
-                "description": "Classic delight with 100% real mozzarella cheese",
+                "name": "Classic Pizza Mania (Tomato)",
+                "price": 49.0,
+                "description": "Tangy tomato sauce with 100% mozzarella cheese",
                 "is_veg": True,
-                "category": "Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
             },
-            {
-                "name": "Double Cheese Margherita",
-                "price": 189.0,
-                "description": "The classic Margherita scaled up with double cheese!",
-                "is_veg": True,
-                "category": "Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Peppy Paneer",
-                "price": 259.0,
-                "description": "Chunky paneer with spicy red paprika, capsicum & mozzarella",
-                "is_veg": True,
-                "category": "Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Farmhouse",
-                "price": 259.0,
-                "description": "Delightful combination of onion, capsicum, tomato & grilled mushroom",
-                "is_veg": True,
-                "category": "Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Veggie Paradise",
-                "price": 259.0,
-                "description": "Gold corn, black olives, capsicum & red paprika",
-                "is_veg": True,
-                "category": "Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Indi Tandoori Paneer",
-                "price": 309.0,
-                "description": "Tandoori paneer with capsicum, red paprika & mint mayo",
-                "is_veg": True,
-                "category": "Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Veg Extravaganza",
-                "price": 309.0,
-                "description": "Black olives, capsicum, onion, grilled mushroom, corn, tomato, jalapeno & extra cheese",
-                "is_veg": True,
-                "category": "Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Cheese n Corn",
-                "price": 189.0,
-                "description": "Sweet & juicy golden corn with 100% real mozzarella cheese",
-                "is_veg": True,
-                "category": "Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Mexican Green Wave",
-                "price": 259.0,
-                "description": "Loaded with crunchy onions, juicy tomatoes, capsicum & jalapenos",
-                "is_veg": True,
-                "category": "Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Paneer Makhani",
-                "price": 259.0,
-                "description": "Flavorful paneer, capsicum & red paprika with traditional Makhani sauce",
-                "is_veg": True,
-                "category": "Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Achari Do Pyaza",
-                "price": 189.0,
-                "description": "Tangy achari flavors with crunchy onions and cheese",
-                "is_veg": True,
-                "category": "Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Fresh Veggie",
-                "price": 189.0,
-                "description": "Delectable combination of onion & capsicum",
-                "is_veg": True,
-                "category": "Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            # Non-Veg Pizzas (Regular Base Price)
-            {
-                "name": "Chicken Pepperoni",
-                "price": 339.0,
-                "description": "Classic chicken pepperoni with mozzarella cheese",
-                "is_veg": False,
-                "category": "Non-Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Non-Veg Supreme",
-                "price": 339.0,
-                "description": "Bite into hot n spicy chicken, chicken meatballs, onion & herby chicken sausage",
-                "is_veg": False,
-                "category": "Non-Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Chicken Golden Delight",
-                "price": 279.0,
-                "description": "Mouth-watering chicken kebab, sweet corn, double cheese",
-                "is_veg": False,
-                "category": "Non-Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Indi Chicken Tikka",
-                "price": 339.0,
-                "description": "Tandoori masala with chicken tikka, onion, red paprika & mint mayo",
-                "is_veg": False,
-                "category": "Non-Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Pepper Barbecue Chicken",
-                "price": 249.0,
-                "description": "Pepper barbecue chicken for that extra spicy kick",
-                "is_veg": False,
-                "category": "Non-Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Chicken Dominator",
-                "price": 369.0,
-                "description": "Loaded with 4 different chicken toppings: barbecue, tikka, meatballs & sausage",
-                "is_veg": False,
-                "category": "Non-Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Chicken Fiesta",
-                "price": 279.0,
-                "description": "Grilled chicken rashers, peri-peri chicken, onion & capsicum",
-                "is_veg": False,
-                "category": "Non-Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Spiced Double Chicken",
-                "price": 279.0,
-                "description": "Pepper barbecue chicken & spicy chicken sausage",
-                "is_veg": False,
-                "category": "Non-Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            {
-                "name": "Chicken Sausage",
-                "price": 199.0,
-                "description": "American classic with spicy chicken sausage",
-                "is_veg": False,
-                "category": "Non-Veg",
-                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
-                "size_options": ["Regular", "Medium", "Large"]
-            },
-            # Pizza Mania
             {
                 "name": "Onion Pizza Mania",
                 "price": 69.0,
@@ -442,9 +260,27 @@ def seed_database():
                 "size_options": ["Regular"]
             },
             {
-                "name": "Capsicum Pizza Mania",
-                "price": 79.0,
-                "description": "Fresh green capsicum with mozzarella cheese",
+                "name": "Capsicum & Red Paprika Pizza Mania",
+                "price": 89.0,
+                "description": "Fresh green capsicum and spicy red paprika",
+                "is_veg": True,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Capsicum & Masala Paneer Pizza Mania",
+                "price": 109.0,
+                "description": "Flavorsome masala paneer with crunchy capsicum",
+                "is_veg": True,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Paneer, Onion & Capsicum Pizza Mania",
+                "price": 123.0,
+                "description": "Chunky paneer, crunchy onion & capsicum",
                 "is_veg": True,
                 "category": "Mania",
                 "crust_options": ["Classic Hand Tossed"],
@@ -452,7 +288,7 @@ def seed_database():
             },
             {
                 "name": "Veg Loaded Pizza Mania",
-                "price": 89.0,
+                "price": 159.0,
                 "description": "Tomato, jalapeno, corn & grilled mushroom",
                 "is_veg": True,
                 "category": "Mania",
@@ -460,45 +296,349 @@ def seed_database():
                 "size_options": ["Regular"]
             },
             {
-                "name": "Paneer n Onion Pizza Mania",
-                "price": 99.0,
-                "description": "Chunky paneer and crunchy onion",
-                "is_veg": True,
-                "category": "Mania",
-                "crust_options": ["Classic Hand Tossed"],
-                "size_options": ["Regular"]
-            },
-            {
-                "name": "Cheesy Pizza Mania",
-                "price": 99.0,
-                "description": "Loaded with extra creamy liquid cheese",
-                "is_veg": True,
-                "category": "Mania",
-                "crust_options": ["Classic Hand Tossed"],
-                "size_options": ["Regular"]
-            },
-            {
-                "name": "Non-Veg Loaded Pizza Mania",
-                "price": 99.0,
-                "description": "Pepper barbecue chicken & spicy chicken sausage",
-                "is_veg": False,
-                "category": "Mania",
-                "crust_options": ["Classic Hand Tossed"],
-                "size_options": ["Regular"]
-            },
-            {
                 "name": "Chicken Sausage Pizza Mania",
-                "price": 99.0,
+                "price": 109.0,
                 "description": "Spicy chicken sausage with mozzarella cheese",
                 "is_veg": False,
                 "category": "Mania",
                 "crust_options": ["Classic Hand Tossed"],
                 "size_options": ["Regular"]
             },
-            # Sides & Snacks
+            {
+                "name": "Pepper Barbecue Chicken Pizza Mania",
+                "price": 109.0,
+                "description": "Pepper barbecue chicken on classic crust",
+                "is_veg": False,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Chicken Keema & Onion Pizza Mania",
+                "price": 129.0,
+                "description": "Spicy chicken keema with crunchy onion",
+                "is_veg": False,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Non-Veg Loaded Pizza Mania",
+                "price": 159.0,
+                "description": "Loaded with pepper barbecue chicken & chicken sausage",
+                "is_veg": False,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+
+            # --- CLASSIC PIZZAS (VEG) ---
+            {
+                "name": "Margherita",
+                "price": 109.0,
+                "description": "Classic delight with 100% real mozzarella cheese",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Achari Do Pyaza",
+                "price": 189.0,
+                "description": "Tangy achari flavors with crunchy onions and cheese",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Corn & Cheese Paratha Pizza",
+                "price": 189.0,
+                "description": "Delicious paratha crust topped with sweet corn and cheese",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["Paratha Crust"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Fresh Veggie",
+                "price": 209.0,
+                "description": "Delectable combination of onion & capsicum",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Cheese n Corn",
+                "price": 209.0,
+                "description": "Sweet & juicy golden corn with 100% real mozzarella cheese",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Double Cheese Margherita",
+                "price": 209.0,
+                "description": "The classic Margherita scaled up with double cheese!",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Spiced Double Cheese",
+                "price": 209.0,
+                "description": "Loaded with extra cheese and spicy seasoning",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Peppy Paneer",
+                "price": 279.0,
+                "description": "Chunky paneer with spicy red paprika, capsicum & mozzarella",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Veggie Paradise",
+                "price": 279.0,
+                "description": "Gold corn, black olives, capsicum & red paprika",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Farmhouse",
+                "price": 279.0,
+                "description": "Delightful combination of onion, capsicum, tomato & grilled mushroom",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Mexican Green Wave",
+                "price": 279.0,
+                "description": "Loaded with crunchy onions, juicy tomatoes, capsicum & jalapenos",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Veg Extravaganza",
+                "price": 349.0,
+                "description": "Black olives, capsicum, onion, grilled mushroom, corn, tomato, jalapeno & extra cheese",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Indi Tandoori Paneer",
+                "price": 349.0,
+                "description": "Tandoori paneer with capsicum, red paprika & mint mayo",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Cheese Overload",
+                "price": 359.0,
+                "description": "Ultra creamy pizza loaded with 35% more liquid cheese",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+
+            # --- CLASSIC PIZZAS (NON-VEG) ---
+            {
+                "name": "Chicken Sausage",
+                "price": 209.0,
+                "description": "American classic with spicy chicken sausage",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Pepper Barbecue Chicken",
+                "price": 259.0,
+                "description": "Pepper barbecue chicken for that extra spicy kick",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Chicken Keema Paratha Pizza",
+                "price": 259.0,
+                "description": "Paratha crust topped with spicy chicken keema & cheese",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["Paratha Crust"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Chicken Fiesta",
+                "price": 319.0,
+                "description": "Grilled chicken rashers, peri-peri chicken, onion & capsicum",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Spiced Double Chicken",
+                "price": 319.0,
+                "description": "Pepper barbecue chicken & spicy chicken sausage",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Chicken Golden Delight",
+                "price": 319.0,
+                "description": "Mouth-watering chicken kebab, sweet corn, double cheese",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Non-Veg Supreme",
+                "price": 369.0,
+                "description": "Bite into hot n spicy chicken, chicken meatballs, onion & herby chicken sausage",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Indi Chicken Tikka",
+                "price": 369.0,
+                "description": "Tandoori masala with chicken tikka, onion, red paprika & mint mayo",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Chicken Pepperoni",
+                "price": 369.0,
+                "description": "Classic chicken pepperoni with mozzarella cheese",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Chicken Dominator",
+                "price": 409.0,
+                "description": "Loaded with 4 different chicken toppings: barbecue, tikka, meatballs & sausage",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "The 5 Chicken Feast Pizza",
+                "price": 409.0,
+                "description": "Ultimate chicken feast loaded with 5 supreme chicken toppings",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+
+            # --- CHEF'S SPECIAL & PREMIUM PIZZAS ---
+            {
+                "name": "Cheese Volcano Farmhouse",
+                "price": 289.0,
+                "description": "Center molten cheese volcano surrounded by Farmhouse toppings",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["Cheese Volcano Crust"],
+                "size_options": ["Medium"]
+            },
+            {
+                "name": "Cheese Volcano Peppy Paneer",
+                "price": 289.0,
+                "description": "Molten cheese volcano pool with spicy paneer tikka",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["Cheese Volcano Crust"],
+                "size_options": ["Medium"]
+            },
+            {
+                "name": "Cheese Volcano Veggie Paradise",
+                "price": 289.0,
+                "description": "Cheesy volcano center with golden corn & paprika",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["Cheese Volcano Crust"],
+                "size_options": ["Medium"]
+            },
+            {
+                "name": "Sourdough Classic Veg",
+                "price": 349.0,
+                "description": "Artisanal sourdough crust topped with fresh mozzarella & herbs",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["Artisanal Sourdough"],
+                "size_options": ["Medium"]
+            },
+            {
+                "name": "Sourdough Creamy Truffle Mushroom",
+                "price": 389.0,
+                "description": "Sourdough crust infused with truffle mushroom cream sauce",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["Artisanal Sourdough"],
+                "size_options": ["Medium"]
+            },
+            {
+                "name": "Burger Pizza Classic Veg",
+                "price": 129.0,
+                "description": "Looks like a burger, tastes like a pizza!",
+                "is_veg": True,
+                "category": "Sides",
+                "crust_options": ["Burger Crust"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Burger Pizza Premium Veg",
+                "price": 159.0,
+                "description": "Burger pizza loaded with paneer & extra cheese",
+                "is_veg": True,
+                "category": "Sides",
+                "crust_options": ["Burger Crust"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Burger Pizza Classic Non-Veg",
+                "price": 161.0,
+                "description": "Burger pizza stuffed with chicken patty & cheese",
+                "is_veg": False,
+                "category": "Sides",
+                "crust_options": ["Burger Crust"],
+                "size_options": ["Regular"]
+            },
+
+            # --- SIDES & SNACKS ---
             {
                 "name": "Garlic Breadsticks",
-                "price": 109.0,
+                "price": 119.0,
                 "description": "Baked to perfection, garlic-buttered breadsticks served with seasoning",
                 "is_veg": True,
                 "category": "Sides"
@@ -511,10 +651,31 @@ def seed_database():
                 "category": "Sides"
             },
             {
-                "name": "Paneer Tikka Garlic Bread",
-                "price": 179.0,
-                "description": "Stuffed garlic bread with spicy paneer tikka & cheese",
+                "name": "Zingy Parcel Veg",
+                "price": 60.0,
+                "description": "Golden brown pastry filled with creamy harissa veg filling",
                 "is_veg": True,
+                "category": "Sides"
+            },
+            {
+                "name": "Zingy Parcel Non-Veg",
+                "price": 70.0,
+                "description": "Golden brown pastry filled with spicy chicken filling",
+                "is_veg": False,
+                "category": "Sides"
+            },
+            {
+                "name": "Loaded Saucy Paneer Parcel - Tandoori",
+                "price": 80.0,
+                "description": "Paneer parcel with rich tandoori sauce",
+                "is_veg": True,
+                "category": "Sides"
+            },
+            {
+                "name": "Loaded Saucy Chicken Parcel - Tandoori",
+                "price": 90.0,
+                "description": "Chicken parcel with rich tandoori sauce",
+                "is_veg": False,
                 "category": "Sides"
             },
             {
@@ -532,16 +693,30 @@ def seed_database():
                 "category": "Sides"
             },
             {
-                "name": "Veg Parcel",
-                "price": 59.0,
-                "description": "Golden brown pastry filled with creamy harissa veg filling",
+                "name": "Single Taco Veg",
+                "price": 80.0,
+                "description": "Single crispy Mexican taco shell filled with veg patty",
                 "is_veg": True,
                 "category": "Sides"
             },
             {
-                "name": "Chicken Parcel",
-                "price": 69.0,
-                "description": "Golden brown pastry filled with spicy chicken filling",
+                "name": "Double Taco Veg",
+                "price": 150.0,
+                "description": "Double pair of crispy Mexican veg tacos",
+                "is_veg": True,
+                "category": "Sides"
+            },
+            {
+                "name": "Single Taco Non-Veg",
+                "price": 90.0,
+                "description": "Single crispy Mexican taco shell with spicy chicken",
+                "is_veg": False,
+                "category": "Sides"
+            },
+            {
+                "name": "Double Taco Non-Veg",
+                "price": 170.0,
+                "description": "Double pair of crispy Mexican chicken tacos",
                 "is_veg": False,
                 "category": "Sides"
             },
@@ -552,68 +727,121 @@ def seed_database():
                 "is_veg": True,
                 "category": "Sides"
             },
-            # Desserts
+            {
+                "name": "Cheesy Jalapeno Dip",
+                "price": 30.0,
+                "description": "Spicy jalapeno infused cheese dip",
+                "is_veg": True,
+                "category": "Sides"
+            },
+            {
+                "name": "Peri Peri Dip",
+                "price": 30.0,
+                "description": "Hot & tangy peri-peri seasoning dip",
+                "is_veg": True,
+                "category": "Sides"
+            },
+
+            # --- CHICKEN FEAST ---
+            {
+                "name": "Spicy Chicken Pops",
+                "price": 99.0,
+                "description": "Bite-sized crunchy spicy chicken pops",
+                "is_veg": False,
+                "category": "Sides"
+            },
+            {
+                "name": "Spicy Chicken Bombs",
+                "price": 109.0,
+                "description": "Crispy fried chicken bombs with liquid cheese core",
+                "is_veg": False,
+                "category": "Sides"
+            },
+            {
+                "name": "Mini Garlic Cheese Chicken Rice",
+                "price": 139.0,
+                "description": "Garlic butter chicken rice topped with melted cheese",
+                "is_veg": False,
+                "category": "Sides"
+            },
+            {
+                "name": "Garlic Cheese Chicken",
+                "price": 169.0,
+                "description": "Tender chicken breasts smothered in garlic cheese sauce",
+                "is_veg": False,
+                "category": "Sides"
+            },
+            {
+                "name": "Grilled Wings - Southern Spice",
+                "price": 169.0,
+                "description": "Juicy grilled chicken wings marinated in Southern spices",
+                "is_veg": False,
+                "category": "Sides"
+            },
+
+            # --- DESSERTS ---
             {
                 "name": "Choco Lava Cake",
-                "price": 109.0,
+                "price": 119.0,
                 "description": "Gooey molten chocolate lava inside a soft cocoa cake",
                 "is_veg": True,
                 "category": "Desserts"
             },
             {
                 "name": "Butterscotch Mousse Cup",
-                "price": 99.0,
+                "price": 109.0,
                 "description": "Sweet butterscotch mousse whipped to creamy perfection",
                 "is_veg": True,
                 "category": "Desserts"
             },
             {
                 "name": "Red Velvet Lava Cake",
-                "price": 129.0,
+                "price": 149.0,
                 "description": "Rich red velvet cake with melted white chocolate center",
                 "is_veg": True,
                 "category": "Desserts"
             },
-            # Beverages / Drinks
+
+            # --- BEVERAGES ---
             {
-                "name": "Pepsi 500ml",
-                "price": 60.0,
-                "description": "Sparkling refreshment to complete your meal",
+                "name": "Packaged Drinking Water",
+                "price": 20.0,
+                "description": "Pure packaged mineral water",
                 "is_veg": True,
                 "category": "Drinks"
             },
             {
-                "name": "Pepsi Black 500ml",
-                "price": 60.0,
-                "description": "Zero sugar sparkling cola",
+                "name": "Fountain Drinks (350ml)",
+                "price": 65.0,
+                "description": "Refreshing Coca-Cola / Sprite / Fanta",
                 "is_veg": True,
                 "category": "Drinks"
             },
             {
-                "name": "7Up 500ml",
-                "price": 60.0,
-                "description": "Refreshing clear lemon lime beverage",
+                "name": "Drinks (475ml)",
+                "price": 70.0,
+                "description": "Bottle of Coca-Cola / Sprite / Fanta",
                 "is_veg": True,
                 "category": "Drinks"
             },
             {
-                "name": "Mirinda 500ml",
-                "price": 60.0,
-                "description": "Fruity orange fizzy drink",
+                "name": "Coca Cola Zero Sugar (330ml Can)",
+                "price": 70.0,
+                "description": "Chilled zero-sugar Coca-Cola can",
                 "is_veg": True,
                 "category": "Drinks"
             },
             {
-                "name": "Mountain Dew 500ml",
-                "price": 60.0,
-                "description": "High-energy citrus drink",
+                "name": "B Natural Juice",
+                "price": 70.0,
+                "description": "Natural Mango / Orange / Mixed Fruit juice",
                 "is_veg": True,
                 "category": "Drinks"
             },
             {
-                "name": "Mineral Water 1L",
-                "price": 30.0,
-                "description": "Packaged drinking water",
+                "name": "Unlimited Coke",
+                "price": 75.0,
+                "description": "Unlimited fountain refills on Coca-Cola",
                 "is_veg": True,
                 "category": "Drinks"
             }
