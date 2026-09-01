@@ -4406,106 +4406,77 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         cart_text, cart_markup = render_cart_message(db, user, session["cart"], session)
         await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
 
-    elif data == "apply_deal_4":
-        # Deal 4: Classic Duo - 1x Paneer + 1x Capsicum - ₹105
-        p_paneer = (db.query(Product).filter(Product.name.like("%Paneer%")).first() or db.query(Product).first())
-        p_cap = (db.query(Product).filter(Product.name.like("%Capsicum%")).first() or p_paneer)
-        if not p_paneer:
-            await answer_callback_query(callback_query_id, "Product database is empty!")
-            return
-        session["cart"] = {str(p_paneer.id): 1, str(p_cap.id): 1} if str(p_paneer.id) != str(p_cap.id) else {str(p_paneer.id): 2}
-        session["active_deal"] = "deal_4"
-        session["deal_price"] = 105.0
-        await answer_callback_query(callback_query_id, "Deal 4 applied! ₹105")
-        cart_text, cart_markup = render_cart_message(db, user, session["cart"], session)
-        await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
-
-    elif data == "apply_deal_5a":
-        # Deal 5A: 3x Onion Pizzas - ₹100
-        p = (db.query(Product).filter(Product.name.like("%Onion%")).first() or db.query(Product).first())
-        if not p:
-            await answer_callback_query(callback_query_id, "Product database is empty!")
-            return
-        session["cart"] = {str(p.id): 3}
-        session["active_deal"] = "deal_5a"
-        session["deal_price"] = 100.0
-        await answer_callback_query(callback_query_id, "Deal 5A applied! ₹100")
-        cart_text, cart_markup = render_cart_message(db, user, session["cart"], session)
-        await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
-
-    elif data == "apply_deal_5b":
-        # Deal 5B: 4x Classic Pizzas - ₹90
-        p = (db.query(Product).filter(Product.name.like("%Classic%")).first() or db.query(Product).first())
-        if not p:
-            await answer_callback_query(callback_query_id, "Product database is empty!")
-            return
-        session["cart"] = {str(p.id): 4}
-        session["active_deal"] = "deal_5b"
-        session["deal_price"] = 90.0
-        await answer_callback_query(callback_query_id, "Deal 5B applied! ₹90")
-        cart_text, cart_markup = render_cart_message(db, user, session["cart"], session)
-        await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
-
-    elif data == "apply_deal_6":
-        # Deal 6: 2x Chicken Sausage Pizzas - ₹105
-        p = (db.query(Product).filter(Product.name.like("%Chicken Sausage%")).first()
-             or db.query(Product).filter(Product.name.like("%Chicken%")).first()
-             or db.query(Product).first())
-        if not p:
-            await answer_callback_query(callback_query_id, "Product database is empty!")
-            return
-        session["cart"] = {str(p.id): 2}
-        session["active_deal"] = "deal_6"
-        session["deal_price"] = 105.0
-        await answer_callback_query(callback_query_id, "Deal 6 applied! ₹105")
-        cart_text, cart_markup = render_cart_message(db, user, session["cart"], session)
-        await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
-
     elif data == "support_menu":
         support_help = (
-            "\ud83d\udcac <b>Contact Support & FAQs</b>\n\n"
-            "Need help with your order, wallet, or deals?\n\n"
-            "\u2022 <b>Send Message:</b> Contact our support team directly\n"
-            "\u2022 <b>FAQs:</b> Tap a question below for instant answers"
+            "💬 <b>Support & Assistance Hub</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Need assistance with an order, wallet deposit, or want a custom bulk pizza combo?\n\n"
+            "• <b>Custom Orders / Bulk Requests:</b> Tap below to request special combos\n"
+            "• <b>Direct Message:</b> Send a message directly to our support team\n"
+            "• <b>Instant FAQs:</b> Tap any topic below for quick answers"
         )
         support_markup = {
             "inline_keyboard": [
-                [{"text": "\ud83d\udcac Send a Message to Support", "callback_data": "support_send_message"}],
-                [{"text": "\ud83d\udcd6 FAQ: How to Order?", "callback_data": "faq_how_to_order"}],
-                [{"text": "\ud83d\udcb3 FAQ: Wallet & Deposits?", "callback_data": "faq_wallet_upi"}],
-                [{"text": "\ud83d\udce6 FAQ: Where is my Order?", "callback_data": "faq_where_order"}],
-                [{"text": "\ud83e\udd1d FAQ: Custom Deals?", "callback_data": "faq_custom_deals"}]
+                [{"text": "🍕 Request Custom / Bulk Pizza Combo", "callback_data": "support_custom_order"}],
+                [{"text": "💬 Send Direct Message to Support", "callback_data": "support_send_message"}],
+                [{"text": "📖 FAQ: How to Order?", "callback_data": "faq_how_to_order"}],
+                [{"text": "💳 FAQ: Wallet & Deposits?", "callback_data": "faq_wallet_upi"}],
+                [{"text": "📦 FAQ: Where is my Order?", "callback_data": "faq_where_order"}],
+                [{"text": "🏠 Main Menu", "callback_data": "menu_view"}]
             ]
         }
         await edit_bot_message(user.telegram_id, message_id, support_help, reply_markup=support_markup)
         await answer_callback_query(callback_query_id)
 
+    elif data == "support_custom_order":
+        session["state"] = "waiting_for_support_message"
+        session["support_relation"] = "Custom Order Request"
+        prompt_text = (
+            "🍕 <b>Custom / Bulk Order Template Request</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Need a custom pizza deal, party bulk order, or special combination?\n\n"
+            "Please type your details in this format:\n"
+            "• <b>Pizzas & Quantity:</b> (e.g. 10x Medium Farmhouse + 5x Garlic Bread)\n"
+            "• <b>Delivery Location / City:</b>\n"
+            "• <b>Preferred Time:</b>\n\n"
+            "<i>Our team will review your request and quote a custom discounted price directly in this chat! 💬</i>"
+        )
+        await send_bot_message(user.telegram_id, prompt_text, reply_markup=main_keyboard)
+        await answer_callback_query(callback_query_id)
+
     elif data == "support_send_message":
         session["state"] = "waiting_for_support_message"
+        session["support_relation"] = "General Support"
         await send_bot_message(
             user.telegram_id,
-            "💬 <b>Send a Support Message</b>\n\n"
+            "💬 <b>Send Support Message</b>\n\n"
             "Please type your message below and press send.\n"
             "Our support team will review it and reply directly in this chat.\n\n"
             "<i>Describe your issue clearly, e.g.:\n"
-            "\"My order #PIZZA-12345 has not been delivered after 1 hour.\"</i>",
-            reply_markup={"keyboard": [[{"text": "❌ Cancel"}]], "resize_keyboard": True, "one_time_keyboard": True}
+            "\"My order #BOT-12345 has not been delivered yet.\"</i>",
+            reply_markup=main_keyboard
         )
         await answer_callback_query(callback_query_id)
 
     elif data == "faq_how_to_order":
         faq_text = (
-            "\ud83d\udcd6 <b>FAQ: How to Order?</b>\n\n"
-            "1\ufe0f\u20e3 Tap <b>\ud83d\ude92 View Menu</b> to browse Domino's pizzas\n"
-            "2\ufe0f\u20e3 Tap <b>+ Add to Cart</b> on any item you want\n"
-            "3\ufe0f\u20e3 Tap <b>\ud83d\uded2 View Cart</b> and then <b>Checkout</b>\n"
-            "4\ufe0f\u20e3 Confirm your delivery address and phone number\n"
-            "5\ufe0f\u20e3 Choose to pay with <b>\ud83d\udcb3 Wallet</b> or <b>\ud83d\udcf2 UPI QR</b>\n"
-            "6\ufe0f\u20e3 Confirm your order — done! \ud83c\udf55\n\n"
-            "<b>Quick Tip:</b> Top-up your wallet first (\ud83d\udcb0 My Wallet \u2192 Add Funds) for the fastest checkout!\n\n"
-            "<b>Active Deals:</b> Tap \ud83c\udf89 Active Offers in the menu for special deal prices!"
+            "📖 <b>FAQ: How to Order?</b>\n\n"
+            "1️⃣ Tap <b>🍕 View Menu</b> to browse Domino's pizzas\n"
+            "2️⃣ Tap <b>➕ Add to Cart</b> on any item you want\n"
+            "3️⃣ Tap <b>🛒 View Cart</b> and then <b>Checkout</b>\n"
+            "4️⃣ Confirm your delivery address and phone number\n"
+            "5️⃣ Choose to pay with <b>💳 Wallet</b> or <b>📱 UPI QR</b>\n"
+            "6️⃣ Confirm your order — done! 🍕\n\n"
+            "<b>Quick Tip:</b> Top-up your wallet first (💰 Wallet → Add Funds) for the fastest checkout!"
         )
-        back_markup = {"inline_keyboard": [[{"text": "\ud83d\udd19 Support Menu", "callback_data": "support_menu"}]]}
+        back_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "🔙 Support Menu", "callback_data": "support_menu"},
+                    {"text": "🏠 Main Menu", "callback_data": "menu_view"}
+                ]
+            ]
+        }
         await edit_bot_message(user.telegram_id, message_id, faq_text, reply_markup=back_markup)
         await answer_callback_query(callback_query_id)
 
@@ -4518,11 +4489,18 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             "3️⃣ Scan the QR code shown and pay the exact amount via any UPI app\n"
             "4️⃣ Tap <b>✅ I Have Paid</b> — our admin will verify and approve your wallet instantly\n\n"
             "<b>How to Pay (Checkout):</b>\n"
-            "• At checkout, choose <b>💳 Pay with Wallet</b> (if balance is enough) or <b>📲 Pay via UPI QR</b>\n"
+            "• At checkout, choose <b>💳 Pay with Wallet</b> (if balance is enough) or <b>📱 Pay via UPI QR</b>\n"
             "• Your balance is shown at checkout so you always know\n\n"
-            "<b>Top-Up ID:</b> Every deposit gets a unique <code>TOPUP-XXXXXX</code> ID. Admins verify by this ID — no UTR needed!"
+            "<b>Top-Up ID:</b> Every deposit gets a unique <code>TOPUP-XXXXXX</code> ID. Admins verify by this ID!"
         )
-        back_markup = {"inline_keyboard": [[{"text": "🔙 Support Menu", "callback_data": "support_menu"}]]}
+        back_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "🔙 Support Menu", "callback_data": "support_menu"},
+                    {"text": "🏠 Main Menu", "callback_data": "menu_view"}
+                ]
+            ]
+        }
         await edit_bot_message(user.telegram_id, message_id, faq_text, reply_markup=back_markup)
         await answer_callback_query(callback_query_id)
 
@@ -4533,21 +4511,34 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             "• Order tracking shows Domino's reference ID, rider name, and your delivery store once your order is dispatched.\n"
             "• You can cancel your order within <b>2 minutes</b> of placing it if it's still in 'Order Processing' status."
         )
-        back_markup = {"inline_keyboard": [[{"text": "🔙 Support Menu", "callback_data": "support_menu"}]]}
+        back_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "🔙 Support Menu", "callback_data": "support_menu"},
+                    {"text": "🏠 Main Menu", "callback_data": "menu_view"}
+                ]
+            ]
+        }
         await edit_bot_message(user.telegram_id, message_id, faq_text, reply_markup=back_markup)
         await answer_callback_query(callback_query_id)
 
     elif data == "faq_custom_deals":
         faq_text = (
-            "🤝 <b>FAQ: Custom Deals?</b>\n\n"
-            "We offer custom pizza combinations at special prices not listed in the public menu!\n\n"
-            "To get a custom deal:\n"
-            "1️⃣ Contact Support via the <b>💬 Send Message</b> option\n"
-            "2️⃣ Tell us which pizzas and quantities you want\n"
-            "3️⃣ Our team will quote you a discounted bundle price\n\n"
-            "Custom deals are great for large orders or events! 🎉"
+            "🤝 <b>FAQ: Custom Deals & Bulk Orders</b>\n\n"
+            "We offer custom pizza combinations at special prices for parties, events, and bulk orders!\n\n"
+            "To request a custom deal:\n"
+            "1️⃣ Tap <b>🍕 Request Custom / Bulk Pizza Combo</b> in the Support Menu\n"
+            "2️⃣ Tell us which pizzas and quantities you need\n"
+            "3️⃣ Our team will quote you a discounted bundle price directly in this chat! 🎉"
         )
-        back_markup = {"inline_keyboard": [[{"text": "🔙 Support Menu", "callback_data": "support_menu"}]]}
+        back_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "🔙 Support Menu", "callback_data": "support_menu"},
+                    {"text": "🏠 Main Menu", "callback_data": "menu_view"}
+                ]
+            ]
+        }
         await edit_bot_message(user.telegram_id, message_id, faq_text, reply_markup=back_markup)
         await answer_callback_query(callback_query_id)
 
