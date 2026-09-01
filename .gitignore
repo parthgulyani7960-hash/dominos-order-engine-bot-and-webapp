@@ -1,7 +1,12 @@
 *.pyc
 __pycache__/
 *.zip
+*.db
+*.db-shm
+*.db-wal
 data/*.db
 data/*.db-shm
 data/*.db-wal
+app/backend/*.db
+backups/*.db
 app/backend/firebase-key.json
