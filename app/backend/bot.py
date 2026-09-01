@@ -1215,15 +1215,13 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
     if edit_message_id:
         edited = await edit_bot_message(user.telegram_id, edit_message_id, menu_text, reply_markup=markup)
         if not edited:
-            # If edit fails (content unchanged / message too old), send fresh
             await send_bot_message(user.telegram_id, menu_text, reply_markup=markup)
     else:
-        # Send animated intro GIF only on first open (not re-opens/edits)
-        gif_url = "https://media.giphy.com/media/10kxE34bJPaDPy/giphy.gif"
-        res = await send_bot_animation(user.telegram_id, gif_url, caption=menu_text, reply_markup=markup)
+        res = await send_bot_message(user.telegram_id, menu_text, reply_markup=markup)
         if str(user.telegram_id) not in USER_BOT_SESSION:
             USER_BOT_SESSION[str(user.telegram_id)] = {"state": None, "cart": {}}
-        USER_BOT_SESSION[str(user.telegram_id)]["last_bot_msg_id"] = res
+        if isinstance(res, int):
+            USER_BOT_SESSION[str(user.telegram_id)]["last_bot_msg_id"] = res
 
 
 
@@ -5963,19 +5961,35 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         if not is_admin:
             await answer_callback_query(callback_query_id, "Unauthorized!")
             return
-        pending_orders = db.query(Order).filter(Order.status.in_(["Paid", "Pending Payment", "Order Processing"])).order_by(Order.created_at.desc()).limit(5).all()
+        pending_orders = db.query(Order).filter(
+            Order.status.in_(["Paid", "Pending Payment", "Pending Verification", "Order Processing"]),
+            ~Order.id.like("TOPUP-%")
+        ).order_by(Order.created_at.desc()).limit(10).all()
+        
         if not pending_orders:
-            await edit_bot_message(user.telegram_id, message_id, "📦 <b>No pending orders found!</b>", reply_markup={"inline_keyboard": [[{"text": "🔙 Back", "callback_data": "admin_refresh_stats"}]]})
+            await edit_bot_message(
+                user.telegram_id,
+                message_id,
+                "📦 <b>No pending pizza orders found!</b>\n\nAll customer orders have been completed.",
+                reply_markup={"inline_keyboard": [[{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}]]}
+            )
             await answer_callback_query(callback_query_id)
             return
 
-        msg = "📦 <b>Pending Orders Control Panel:</b>\n\n"
+        msg = "📦 <b>Pending Pizza Orders Control Panel:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
         buttons = []
         for o in pending_orders:
-            msg += f"• <code>{o.id}</code> — ₹{o.total_payable:.2f} ({o.status})\n"
+            u_name = o.user.display_name if o.user else f"User {o.user_id}"
+            addr_brief = (o.address or "Address pending")[:30]
+            msg += (
+                f"• <b>{o.id}</b> — <b>₹{o.total_payable:.2f}</b>\n"
+                f"  👤 {u_name} | 📱 {o.phone or 'N/A'}\n"
+                f"  🏡 {addr_brief}...\n"
+                f"  Status: <code>{o.status}</code>\n\n"
+            )
             buttons.append([
-                {"text": f"✅ Complete {o.id[:6]}", "callback_data": f"admin_act_complete_{o.id}"},
-                {"text": f"❌ Reject {o.id[:6]}", "callback_data": f"admin_act_reject_{o.id}"}
+                {"text": f"✅ Complete ({o.id[-6:]})", "callback_data": f"admin_act_complete_{o.id}"},
+                {"text": f"❌ Reject ({o.id[-6:]})", "callback_data": f"admin_act_reject_{o.id}"}
             ])
         buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
@@ -5993,18 +6007,12 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             return
             
         session["state"] = f"admin_waiting_ref_{order.id}"
-        
-        cancel_keyboard = {
-            "keyboard": [[{"text": "❌ Cancel"}]],
-            "resize_keyboard": True,
-            "one_time_keyboard": True
-        }
-        await delete_bot_message(user.telegram_id, message_id)
-        await send_bot_message(
+        await edit_bot_message(
             user.telegram_id,
+            message_id,
             f"✅ <b>Complete Order: {order.id}</b>\n\n"
             f"Please enter/type the <b>Domino's Reference Number</b> (e.g. <code>DOM-123456</code>) or type <code>None</code> if no reference:",
-            reply_markup=cancel_keyboard
+            reply_markup={"inline_keyboard": [[{"text": "❌ Cancel", "callback_data": "admin_view_pending_orders"}]]}
         )
         await answer_callback_query(callback_query_id)
         return
@@ -6033,14 +6041,24 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await answer_callback_query(callback_query_id, "Order Approved!")
         
         # Refresh pending list
-        pending_orders = db.query(Order).filter(Order.status.in_(["Paid", "Pending Payment", "Order Processing"])).order_by(Order.created_at.desc()).limit(5).all()
-        msg = "📦 <b>Pending Orders Control Panel:</b>\n\n"
+        pending_orders = db.query(Order).filter(
+            Order.status.in_(["Paid", "Pending Payment", "Pending Verification", "Order Processing"]),
+            ~Order.id.like("TOPUP-%")
+        ).order_by(Order.created_at.desc()).limit(10).all()
+        msg = "📦 <b>Pending Pizza Orders Control Panel:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
         buttons = []
         for o in pending_orders:
-            msg += f"• <code>{o.id}</code> — ₹{o.total_payable:.2f} ({o.status})\n"
+            u_name = o.user.display_name if o.user else f"User {o.user_id}"
+            addr_brief = (o.address or "Address pending")[:30]
+            msg += (
+                f"• <b>{o.id}</b> — <b>₹{o.total_payable:.2f}</b>\n"
+                f"  👤 {u_name} | 📱 {o.phone or 'N/A'}\n"
+                f"  🏡 {addr_brief}...\n"
+                f"  Status: <code>{o.status}</code>\n\n"
+            )
             buttons.append([
-                {"text": f"✅ Complete {o.id[:6]}", "callback_data": f"admin_act_complete_{o.id}"},
-                {"text": f"❌ Reject {o.id[:6]}", "callback_data": f"admin_act_reject_{o.id}"}
+                {"text": f"✅ Complete ({o.id[-6:]})", "callback_data": f"admin_act_complete_{o.id}"},
+                {"text": f"❌ Reject ({o.id[-6:]})", "callback_data": f"admin_act_reject_{o.id}"}
             ])
         buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
@@ -6077,20 +6095,30 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         if refunded:
             customer_msg += f"\n\n💸 <b>Refund Credited!</b>\n<b>₹{order.total_payable:.2f}</b> has been credited back to your wallet balance. New Balance: <b>₹{order.user.wallet_balance:.2f}</b>"
         else:
-            customer_msg += f"\n\nℹ️ Since you paid via UPI, support will verify and process your refund manually."
+            customer_msg += f"\n\nℹ️ Support will verify and process your refund manually."
             
         await send_bot_message(order.user.telegram_id, customer_msg)
         await answer_callback_query(callback_query_id, "Order Rejected & Refunded!")
         
         # Refresh pending list
-        pending_orders = db.query(Order).filter(Order.status.in_(["Paid", "Pending Payment", "Order Processing"])).order_by(Order.created_at.desc()).limit(5).all()
-        msg = "📦 <b>Pending Orders Control Panel:</b>\n\n"
+        pending_orders = db.query(Order).filter(
+            Order.status.in_(["Paid", "Pending Payment", "Pending Verification", "Order Processing"]),
+            ~Order.id.like("TOPUP-%")
+        ).order_by(Order.created_at.desc()).limit(10).all()
+        msg = "📦 <b>Pending Pizza Orders Control Panel:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
         buttons = []
         for o in pending_orders:
-            msg += f"• <code>{o.id}</code> — ₹{o.total_payable:.2f} ({o.status})\n"
+            u_name = o.user.display_name if o.user else f"User {o.user_id}"
+            addr_brief = (o.address or "Address pending")[:30]
+            msg += (
+                f"• <b>{o.id}</b> — <b>₹{o.total_payable:.2f}</b>\n"
+                f"  👤 {u_name} | 📱 {o.phone or 'N/A'}\n"
+                f"  🏡 {addr_brief}...\n"
+                f"  Status: <code>{o.status}</code>\n\n"
+            )
             buttons.append([
-                {"text": f"✅ Complete {o.id[:6]}", "callback_data": f"admin_act_complete_{o.id}"},
-                {"text": f"❌ Reject {o.id[:6]}", "callback_data": f"admin_act_reject_{o.id}"}
+                {"text": f"✅ Complete ({o.id[-6:]})", "callback_data": f"admin_act_complete_{o.id}"},
+                {"text": f"❌ Reject ({o.id[-6:]})", "callback_data": f"admin_act_reject_{o.id}"}
             ])
         buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
@@ -6100,20 +6128,32 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         if not is_admin:
             await answer_callback_query(callback_query_id, "Unauthorized!")
             return
-        pending_deps = db.query(Order).filter(Order.id.like("TOPUP-%"), Order.status == "Pending Verification").order_by(Order.created_at.desc()).limit(5).all()
+        pending_deps = db.query(Order).filter(
+            Order.id.like("TOPUP-%"),
+            Order.status.in_(["Pending Verification", "Pending Payment"])
+        ).order_by(Order.created_at.desc()).limit(10).all()
+        
         if not pending_deps:
-            await edit_bot_message(user.telegram_id, message_id, "🏦 <b>No pending deposit requests found!</b>", reply_markup={"inline_keyboard": [[{"text": "🔙 Back", "callback_data": "admin_refresh_stats"}]]})
+            await edit_bot_message(
+                user.telegram_id,
+                message_id,
+                "🏦 <b>No pending deposit requests found!</b>\n\nAll deposit requests have been processed.",
+                reply_markup={"inline_keyboard": [[{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}]]}
+            )
             await answer_callback_query(callback_query_id)
             return
 
-        msg = "🏦 <b>Pending Deposit Requests Control Panel:</b>\n\n"
+        msg = "🏦 <b>Pending Deposit Requests:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
         buttons = []
         for o in pending_deps:
-            utr_lbl = f"UTR: {o.transaction_id}" if o.transaction_id else "No UTR"
-            msg += f"• <code>{o.id}</code> — ₹{o.total_payable:.2f} ({utr_lbl})\n"
+            u_name = o.user.display_name if o.user else f"User {o.user_id}"
+            msg += (
+                f"• <b>{o.id}</b> — <b>₹{o.total_payable:.2f}</b>\n"
+                f"  👤 {u_name} (ID: <code>{o.user.telegram_id if o.user else o.user_id}</code>) | Status: <code>{o.status}</code>\n\n"
+            )
             buttons.append([
-                {"text": f"✅ Approve {o.id.replace('TOPUP-', '')}", "callback_data": f"admin_dep_approve_{o.id}"},
-                {"text": f"❌ Reject {o.id.replace('TOPUP-', '')}", "callback_data": f"admin_dep_reject_{o.id}"}
+                {"text": f"✅ Approve ₹{o.total_payable:.0f} ({o.id[-6:]})", "callback_data": f"admin_dep_approve_{o.id}"},
+                {"text": f"❌ Reject ({o.id[-6:]})", "callback_data": f"admin_dep_reject_{o.id}"}
             ])
         buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
