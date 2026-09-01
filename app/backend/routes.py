@@ -2342,12 +2342,17 @@ def adjust_user_wallet(user_id: str, payload: WalletAdjustmentPayload, db: Sessi
         from .bot import send_bot_message
         direction = "credited to" if payload.amount > 0 else "deducted from"
         abs_amount = abs(payload.amount)
-        asyncio.create_task(send_bot_message(
-            user.telegram_id,
-            f"💰 <b>Wallet Balance Adjusted</b>\n\n"
-            f"An amount of <b>₹{abs_amount:.2f}</b> has been {direction} your wallet by the administrator.\n"
-            f"<b>New Wallet Balance:</b> <b>₹{user.wallet_balance:.2f}</b>"
-        ))
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(send_bot_message(
+                    user.telegram_id,
+                    f"💰 <b>Wallet Balance Adjusted</b>\n\n"
+                    f"An amount of <b>₹{abs_amount:.2f}</b> has been {direction} your wallet by the administrator.\n"
+                    f"<b>New Wallet Balance:</b> <b>₹{user.wallet_balance:.2f}</b>"
+                ))
+        except Exception:
+            pass
     except Exception:
         pass
         
@@ -4069,7 +4074,7 @@ async def verify_dominos_otp(payload: DominosOTPVerifyPayload, request: Request,
         if "manual fallback" in err_msg.lower():
             # Check if a session was already saved in the DB (background monitor may have got it)
             if otp_req:
-                tl = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
+                tl = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(minutes=5)
                 saved = db.query(DominosSession).filter(
                     DominosSession.mobile_number == otp_req.mobile_number,
                     DominosSession.is_active == True,
@@ -4783,7 +4788,9 @@ async def verify_payment(order_id: str, payload: PaymentVerifyRequest, request: 
         
     # Check if order is too old (timeout: 20 minutes)
     import datetime
-    order_age_seconds = (datetime.datetime.utcnow() - order.created_at).total_seconds()
+    _now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    order_created = order.created_at.replace(tzinfo=None) if order.created_at and order.created_at.tzinfo else order.created_at
+    order_age_seconds = (_now - order_created).total_seconds() if order_created else 0
     if order_age_seconds > 1200:
         raise HTTPException(status_code=400, detail="This payment verification window has expired (20 minutes limit). Please place a new order.")
         

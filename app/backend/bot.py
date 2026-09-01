@@ -3673,7 +3673,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
     elif text_lower == "📦 track orders" or text.startswith("/track") or text.startswith("/orders") or text.startswith("/status"):
         import datetime as _dt
         _ist_offset = _dt.timedelta(hours=5, minutes=30)
-        _now_utc = _dt.datetime.utcnow()
+        _now_utc = _dt.datetime.now(_dt.timezone.utc).replace(tzinfo=None)
         _cutoff_utc = _now_utc - _dt.timedelta(hours=24)
         orders = db.query(Order).filter(
             Order.user_id == user.id,
