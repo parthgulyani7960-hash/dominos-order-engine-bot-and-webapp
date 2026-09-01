@@ -1466,6 +1466,8 @@ def sync_user_db_session(db: Session, user: User, session: dict):
         user.bot_state = session.get("state")
         user.bot_cart = json.dumps(session.get("cart", {}))
         db.commit()
+        from .database import auto_save_persistent_db_state
+        auto_save_persistent_db_state(db)
     except Exception as e:
         logger.error(f"[DB Session Sync Error] {e}")
         db.rollback()

@@ -551,18 +551,170 @@ class WithdrawalRequest(TimestampMixin, Base):
     user = relationship("User", backref="withdrawal_requests")
 
 
+    pass
+
+
 # ---------------------------------------------------------------------------
-# Database initialization (Alembic-aware)
+# Database Persistence & Corruption Prevention System
+# ---------------------------------------------------------------------------
+
+PERSISTENT_BACKUP_PATH = os.path.join(DATA_DIR, "db_persistent_state.json")
+
+def auto_save_persistent_db_state(db=None) -> bool:
+    """Saves non-volatile user balances, orders, and state to a persistent JSON snapshot."""
+    close_after = False
+    if db is None:
+        db = SessionLocal()
+        close_after = True
+    try:
+        users = db.query(User).all()
+        orders = db.query(Order).all()
+        
+        users_data = []
+        for u in users:
+            users_data.append({
+                "id": u.id,
+                "telegram_id": u.telegram_id,
+                "first_name": u.first_name,
+                "last_name": u.last_name,
+                "username": u.username,
+                "display_name": u.display_name,
+                "phone": u.phone,
+                "city": u.city,
+                "address": u.address,
+                "wallet_balance": float(u.wallet_balance or 0.0),
+                "is_admin": bool(u.is_admin),
+                "bot_state": u.bot_state,
+                "bot_cart": u.bot_cart,
+                "telegram_verified": bool(u.telegram_verified),
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+            })
+
+        orders_data = []
+        for o in orders:
+            orders_data.append({
+                "id": o.id,
+                "user_id": o.user_id,
+                "total_payable": float(o.total_payable or 0.0),
+                "status": o.status,
+                "payment_method": o.payment_method,
+                "address": o.address,
+                "phone": o.phone,
+                "dominos_order_id": o.dominos_order_id,
+                "transaction_id": o.transaction_id,
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+            })
+
+        data = {
+            "version": 1.0,
+            "saved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "users": users_data,
+            "orders": orders_data,
+        }
+
+        with open(PERSISTENT_BACKUP_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"[PERSISTENCE] Failed to save DB snapshot: {e}")
+        return False
+    finally:
+        if close_after:
+            db.close()
+
+
+def auto_restore_persistent_db_state(db) -> bool:
+    """Restores user accounts, wallet balances, and orders if the database file was reset or replaced on deployment."""
+    if not os.path.exists(PERSISTENT_BACKUP_PATH):
+        return False
+    try:
+        with open(PERSISTENT_BACKUP_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        restored_users = 0
+        for u_data in data.get("users", []):
+            tg_id = str(u_data.get("telegram_id", ""))
+            existing = db.query(User).filter(
+                (User.telegram_id == tg_id) | (User.id == u_data["id"])
+            ).first()
+            if not existing:
+                u = User(
+                    id=u_data["id"],
+                    telegram_id=tg_id,
+                    first_name=u_data.get("first_name"),
+                    last_name=u_data.get("last_name"),
+                    username=u_data.get("username"),
+                    display_name=u_data.get("display_name"),
+                    phone=u_data.get("phone"),
+                    city=u_data.get("city", "India"),
+                    address=u_data.get("address"),
+                    wallet_balance=float(u_data.get("wallet_balance", 0.0)),
+                    is_admin=bool(u_data.get("is_admin", False)),
+                    bot_state=u_data.get("bot_state"),
+                    bot_cart=u_data.get("bot_cart"),
+                    telegram_verified=bool(u_data.get("telegram_verified", False))
+                )
+                db.add(u)
+                restored_users += 1
+            else:
+                # Synchronize wallet balance if higher in backup file
+                b_bal = float(u_data.get("wallet_balance", 0.0))
+                if b_bal > existing.wallet_balance:
+                    existing.wallet_balance = b_bal
+
+        restored_orders = 0
+        for o_data in data.get("orders", []):
+            existing_order = db.query(Order).filter(Order.id == o_data["id"]).first()
+            if not existing_order:
+                o = Order(
+                    id=o_data["id"],
+                    user_id=o_data["user_id"],
+                    total_payable=float(o_data.get("total_payable", 0.0)),
+                    status=o_data.get("status", "Pending"),
+                    payment_method=o_data.get("payment_method", "wallet"),
+                    address=o_data.get("address"),
+                    phone=o_data.get("phone"),
+                    dominos_order_id=o_data.get("dominos_order_id"),
+                    transaction_id=o_data.get("transaction_id")
+                )
+                db.add(o)
+                restored_orders += 1
+
+        db.commit()
+        if restored_users > 0 or restored_orders > 0:
+            logger.info(f"[PERSISTENCE] Restored {restored_users} users & {restored_orders} orders from persistent backup state!")
+        return True
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[PERSISTENCE] Error restoring persistent state: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Database initialization (Alembic-aware & Corruption Proof)
 # ---------------------------------------------------------------------------
 
 def init_db() -> None:
-    """Create all tables and ensure newer columns exist on startup."""
+    """Create all tables, auto-repair corruption, and auto-restore user records on startup."""
+    from sqlalchemy import text
+    if _IS_SQLITE:
+        try:
+            with engine.connect() as conn:
+                res = conn.execute(text("PRAGMA integrity_check")).fetchone()
+                if res and res[0] != "ok":
+                    logger.error(f"[DB INTEGRITY REPAIR] Corruption detected ({res[0]}). Executing VACUUM & REINDEX...")
+                    conn.execute(text("PRAGMA journal_mode=DELETE;"))
+                    conn.execute(text("VACUUM;"))
+                    conn.execute(text("REINDEX;"))
+                    conn.execute(text("PRAGMA journal_mode=WAL;"))
+        except Exception as e:
+            logger.error(f"[DB INTEGRITY CHECK ERROR] {e}")
+
     # Always call create_all to ensure any missing tables for defined models are created.
     # Safe to call as it does CREATE TABLE IF NOT EXISTS.
     Base.metadata.create_all(bind=engine)
         
     # Ensure newer columns are added if they don't exist (for existing databases)
-    from sqlalchemy import text
     with engine.begin() as conn:
         insp = inspect(engine)
         # User verification & expiry columns
@@ -608,7 +760,12 @@ def init_db() -> None:
                 )
             """))
 
-    pass
+    # Auto-restore persistent state if new database instance
+    db = SessionLocal()
+    try:
+        auto_restore_persistent_db_state(db)
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
