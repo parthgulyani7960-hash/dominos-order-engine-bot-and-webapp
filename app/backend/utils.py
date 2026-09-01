@@ -285,7 +285,7 @@ def generate_upi_qr_details(upi_id: str, upi_name: str, amount: float, ref_id: s
       - qr_data_url: High resolution base64 PNG data URI with 4-module quiet zone & medium ECC
       - qr_code_url: High quality external API URL fallback with 4-module quiet zone & ECC
     """
-    clean_id = (upi_id or "dominos@upi").strip()
+    clean_id = (upi_id or "pranjalnautry@fam").strip()
     clean_name = (upi_name or "Domino's Order Engine").strip()
     clean_ref = (ref_id or "").strip()
     clean_note = (note or f"Order {clean_ref}").strip()

@@ -407,7 +407,19 @@ async def send_admin_order_details(telegram_id: str, order_id: str, db: Session,
         f"• <b>Screenshot/Receipt:</b> {screenshot_disp}\n"
     )
     
+    import urllib.parse
+    lat = order.user.latitude if order.user else None
+    lon = order.user.longitude if order.user else None
+    if lat and lon:
+        maps_url = f"https://www.google.com/maps?q={lat},{lon}"
+    else:
+        clean_addr = urllib.parse.quote(order.delivery_address or "India")
+        maps_url = f"https://www.google.com/maps/search/?api=1&query={clean_addr}"
+
     buttons = [
+        [
+            {"text": "📍 Open Google Maps Location", "url": maps_url}
+        ],
         [
             {"text": "✏️ Domino's Ref", "callback_data": f"admin_edit_ref_{order.id}"},
             {"text": "✏️ Sector Store", "callback_data": f"admin_edit_store_{order.id}"}
@@ -1664,7 +1676,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             upi_id_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
             upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
             maint_cfg = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
-            upi_id = upi_id_cfg.value if upi_id_cfg else "dominos@upi"
+            upi_id = upi_id_cfg.value if upi_id_cfg else "pranjalnautry@fam"
             upi_name = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
             maint_val = maint_cfg.value if maint_cfg else "false"
             maint_status = "⚠️ MAINTENANCE ON" if maint_val == "true" else "🟢 ONLINE"
@@ -2740,7 +2752,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
         maint_cfg = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
         
-        upi_id_val = upi_id_cfg.value if upi_id_cfg else "dominos@upi"
+        upi_id_val = upi_id_cfg.value if upi_id_cfg else "pranjalnautry@fam"
         upi_name_val = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
         maint_val = maint_cfg.value if maint_cfg else "false"
         maint_status = "⚠️ MAINTENANCE ON" if maint_val == "true" else "🟢 ONLINE"
@@ -2800,7 +2812,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
         maint_cfg = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
         
-        upi_id_val = upi_id_cfg.value if upi_id_cfg else "dominos@upi"
+        upi_id_val = upi_id_cfg.value if upi_id_cfg else "pranjalnautry@fam"
         upi_name_val = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
         maint_val = maint_cfg.value if maint_cfg else "false"
         maint_status = "⚠️ MAINTENANCE ON" if maint_val == "true" else "🟢 ONLINE"
@@ -4848,7 +4860,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         # Construct merchant UPI Payment URI
         upi_id_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
         upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
-        upi_id = upi_id_cfg.value if upi_id_cfg else "dominos@upi"
+        upi_id = upi_id_cfg.value if upi_id_cfg else "pranjalnautry@fam"
         upi_name = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
         
         upi_details = generate_upi_qr_details(upi_id, upi_name, order.total_payable, order.id, f"Order {order.id}")
@@ -5197,7 +5209,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
         maint_cfg = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
         
-        upi_id = upi_id_cfg.value if upi_id_cfg else "dominos@upi"
+        upi_id = upi_id_cfg.value if upi_id_cfg else "pranjalnautry@fam"
         upi_name = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
         maint_val = maint_cfg.value if maint_cfg else "false"
         maint_status = "⚠️ MAINTENANCE ON" if maint_val == "true" else "🟢 ONLINE"
@@ -6965,7 +6977,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         # Construct merchant UPI Payment URI
         upi_id_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
         upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
-        upi_id = upi_id_cfg.value if upi_id_cfg else "dominos@upi"
+        upi_id = upi_id_cfg.value if upi_id_cfg else "pranjalnautry@fam"
         upi_name = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
         
         upi_details = generate_upi_qr_details(upi_id, upi_name, amount, order_id, f"Deposit {order_id}")
@@ -7446,8 +7458,20 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         )
 
         
+        import urllib.parse
+        lat = user.latitude
+        lon = user.longitude
+        if lat and lon:
+            maps_url = f"https://www.google.com/maps?q={lat},{lon}"
+        else:
+            clean_addr = urllib.parse.quote(address or "India")
+            maps_url = f"https://www.google.com/maps/search/?api=1&query={clean_addr}"
+
         action_markup = {
             "inline_keyboard": [
+                [
+                    {"text": "📍 Open Google Maps Location", "url": maps_url}
+                ],
                 [
                     {"text": "✅ Accept & Complete", "callback_data": f"admin_act_complete_{order_id}"},
                     {"text": "❌ Reject & Refund", "callback_data": f"admin_act_reject_{order_id}"}
