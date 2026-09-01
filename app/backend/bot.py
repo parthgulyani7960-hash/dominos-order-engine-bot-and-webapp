@@ -6905,15 +6905,15 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         payment_text = (
             f"💳 <b>Deposit Payment Request</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"• <b>Ref ID / Order ID:</b> <code>{order_id}</code>\n"
+            f"• <b>Ref ID:</b> <code>{order_id}</code>\n"
             f"• <b>Amount:</b> <b>₹{amount:.2f}</b>\n\n"
             f"👉 <a href=\"{upi_uri}\"><b>📱 Click Here to Pay via UPI App</b></a> (mobile) or scan the QR code above.\n\n"
-            f"After completing the UPI payment, tap <b>⚡ Instant Credit / I Have Paid</b> below to credit your wallet balance!"
+            f"After completing the UPI payment, tap <b>✅ I Have Paid</b> below to submit your request for admin verification."
         )
         
         payment_markup = {
             "inline_keyboard": [
-                [{"text": "⚡ Instant Credit / I Have Paid", "callback_data": f"wallet_marked_paid_{order_id}"}],
+                [{"text": "✅ I Have Paid", "callback_data": f"wallet_marked_paid_{order_id}"}],
                 [{"text": "❌ Cancel Request", "callback_data": f"wallet_cancel_deposit_{order_id}"}]
             ]
         }
@@ -6967,7 +6967,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             user.telegram_id,
             message_id,
             f"✍️ <b>Payment Re-submission</b>\n\n"
-            f"Please type your new 12-digit UPI UTR number for Ref ID: <code>{order_id}</code> now:"
+            f"Please type your reference number for Ref ID: <code>{order_id}</code> now:"
         )
         await answer_callback_query(callback_query_id)
         return
@@ -6979,39 +6979,43 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "Order not found!")
             return
             
-        if order.status != "Completed":
-            order.status = "Completed"
-            user.wallet_balance += order.total_payable
-            
-            tx = WalletTransaction(
-                user_id=user.id,
-                type="deposit",
-                amount=order.total_payable,
-                description=f"Wallet Top-Up (Ref: {order_id})"
-            )
-            db.add(tx)
-            db.commit()
-            
-            sync_user_db_session(db, user, session)
+        order.status = "Pending Verification"
+        db.commit()
         
-        success_text = (
-            f"🎉 <b>Wallet Top-Up Successful!</b>\n"
+        pending_text = (
+            f"⏳ <b>Deposit Submitted for Admin Approval</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"✅ <b>₹{order.total_payable:.2f}</b> has been credited to your wallet balance.\n\n"
-            f"💰 <b>Updated Wallet Balance:</b> <b>₹{user.wallet_balance:.2f}</b>\n"
-            f"🆔 <b>Ref ID:</b> <code>{order_id}</code>\n\n"
-            f"You can now order delicious pizzas with 1-click instant checkout! 🍕"
+            f"Your deposit request for <b>₹{order.total_payable:.2f}</b> (Ref: <code>{order_id}</code>) has been submitted for admin verification.\n\n"
+            f"We are verifying your transaction. Your wallet balance will be credited automatically upon approval by an admin! 💰"
         )
-        success_markup = {
+        pending_markup = {
             "inline_keyboard": [
                 [
-                    {"text": "🍕 View Menu & Order", "callback_data": "menu_view"},
+                    {"text": "🍕 View Menu", "callback_data": "menu_view"},
                     {"text": "💰 Wallet Menu", "callback_data": "wallet_view"}
                 ]
             ]
         }
-        await send_bot_message(user.telegram_id, success_text, reply_markup=success_markup)
-        await answer_callback_query(callback_query_id, f"₹{order.total_payable:.2f} credited!")
+        await send_bot_message(user.telegram_id, pending_text, reply_markup=pending_markup)
+        await answer_callback_query(callback_query_id, "Submitted for admin approval!")
+        
+        # Notify admins of the deposit request needing approval
+        admin_text = (
+            "🔔 <b>New Deposit Marked as Paid (Requires Admin Approval)</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👤 <b>User:</b> {user.display_name} (ID: <code>{user.telegram_id}</code>)\n"
+            f"💰 <b>Amount:</b> ₹{order.total_payable:.2f}\n"
+            f"🆔 <b>Ref ID:</b> <code>{order_id}</code>"
+        )
+        admin_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Approve", "callback_data": f"admin_dep_approve_{order.id}"},
+                    {"text": "❌ Reject", "callback_data": f"admin_dep_reject_{order.id}"}
+                ]
+            ]
+        }
+        await notify_admins(db, admin_text, reply_markup=admin_markup)
         
         if sse_broadcast_callback:
             try:
