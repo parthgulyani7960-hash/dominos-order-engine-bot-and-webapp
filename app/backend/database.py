@@ -60,6 +60,7 @@ if _IS_SQLITE:
         cur.execute("PRAGMA synchronous=NORMAL")
         cur.execute("PRAGMA cache_size=-65536")  # 64 MB
         cur.execute("PRAGMA temp_store=MEMORY")
+        cur.execute("PRAGMA busy_timeout=60000")
         cur.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
@@ -379,12 +380,15 @@ class Notification(TimestampMixin, Base):
 class SupportMessage(TimestampMixin, Base):
     __tablename__ = "support_messages"
 
-    id          = Column(String(36), primary_key=True, default=_uuid_default)
-    user_id     = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
-    sender_type = Column(String, nullable=False)  # user | admin
-    message     = Column(Text, nullable=False)
-    is_read     = Column(Boolean, default=False)
+    id                 = Column(String(36), primary_key=True, default=_uuid_default)
+    user_id            = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    sender_type        = Column(String, nullable=False)  # user | admin
+    message            = Column(Text, nullable=False)
+    is_read            = Column(Boolean, default=False)
+    attachment_file_id = Column(String, nullable=True)   # Telegram file_id for photo/document
+    attachment_type    = Column(String, nullable=True)   # photo | document
     __table_args__ = (Index("ix_support_user_unread", "user_id", "is_read"),)
+
 
 
 class AuditLog(Base):
@@ -549,18 +553,15 @@ class WithdrawalRequest(TimestampMixin, Base):
 # ---------------------------------------------------------------------------
 
 def init_db() -> None:
-    """Create all tables only on a fresh DB (no alembic_version table).
-
-    In production, Alembic owns the schema via migrations.  This function is
-    safe to call on every startup – it will be a no-op when Alembic has run.
-    """
-    insp = inspect(engine)
-    if not insp.has_table("alembic_version"):
-        Base.metadata.create_all(bind=engine)
+    """Create all tables and ensure newer columns exist on startup."""
+    # Always call create_all to ensure any missing tables for defined models are created.
+    # Safe to call as it does CREATE TABLE IF NOT EXISTS.
+    Base.metadata.create_all(bind=engine)
         
     # Ensure newer columns are added if they don't exist (for existing databases)
     from sqlalchemy import text
     with engine.begin() as conn:
+        insp = inspect(engine)
         # User verification & expiry columns
         user_cols = [c["name"] for c in insp.get_columns("users")]
         if "telegram_verification_code" not in user_cols:
@@ -578,8 +579,14 @@ def init_db() -> None:
             conn.execute(text("ALTER TABLE orders ADD COLUMN device_details TEXT"))
         if "sector_store" not in order_cols:
             conn.execute(text("ALTER TABLE orders ADD COLUMN sector_store VARCHAR"))
-        if "screenshot_url" not in order_cols:
             conn.execute(text("ALTER TABLE orders ADD COLUMN screenshot_url VARCHAR"))
+            
+        # Support messages columns
+        support_cols = [c["name"] for c in insp.get_columns("support_messages")]
+        if "attachment_file_id" not in support_cols:
+            conn.execute(text("ALTER TABLE support_messages ADD COLUMN attachment_file_id VARCHAR"))
+        if "attachment_type" not in support_cols:
+            conn.execute(text("ALTER TABLE support_messages ADD COLUMN attachment_type VARCHAR"))
 
         # Create withdrawal_requests table if not exists
         if not insp.has_table("withdrawal_requests"):
@@ -598,28 +605,7 @@ def init_db() -> None:
                 )
             """))
 
-        # Clean up / Drop obsolete tables safely
-        obsolete_tables = ["dominos_sessions", "dominos_otp_requests", "proxies", "proxy_logs", "robot_logs"]
-        for table in obsolete_tables:
-            if insp.has_table(table):
-                try:
-                    conn.execute(text(f"DROP TABLE {table}"))
-                except Exception:
-                    pass
-
-    # Initialize Firebase and restore/sync database state
-    try:
-        import logging
-        from .firebase_sync import init_firebase, restore_database_from_firebase
-        if init_firebase():
-            sess = SessionLocal()
-            try:
-                restore_database_from_firebase(sess)
-            finally:
-                sess.close()
-    except Exception as e:
-        logger = logging.getLogger("app.backend.database")
-        logger.error(f"Error during firebase restore/sync: {e}")
+    pass
 
 
 # ---------------------------------------------------------------------------

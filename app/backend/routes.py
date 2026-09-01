@@ -619,6 +619,29 @@ async def delete_product(product_id: str, request: Request, db: Session = Depend
         
     return {"status": "success"}
 
+@router.patch("/products/{product_id}/availability")
+async def toggle_product_availability(
+    product_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin)
+):
+    """Toggles product availability (In Stock / Out of Stock)."""
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    product.availability = not product.availability
+    db.commit()
+    
+    status_str = "Available" if product.availability else "Not Available"
+    await log_admin_action(db, admin.id, admin.username, "PRODUCT_AVAILABILITY_TOGGLED", {"id": product.id, "name": product.name, "availability": product.availability}, request)
+    
+    if sse_broadcast_callback:
+        await sse_broadcast_callback({"type": "menu_update"})
+        
+    return {"status": "success", "product_id": product.id, "name": product.name, "availability": product.availability, "message": f"{product.name} is now marked as {status_str}"}
+
 @router.get("/dominos/menu")
 async def get_dominos_menu(lat: float, lon: float, page: int = 1, limit: int = 10, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Fetch nearby Domino's store and menu items (paginated)."""
@@ -927,86 +950,10 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
                 "service_charge": service_charge,
                 "total": total_payable
             }
-        }
-    
-    # 4. Gift Card Allocation Logic (Wallet Flow)
-    # Pull the oldest available gift card that matches or exceeds order payable, or simply any available gift card.
-    gift_card = db.query(GiftCard).filter(
-        GiftCard.status == "available",
-        GiftCard.value >= total_payable
-    ).order_by(GiftCard.created_at.asc()).first()
-    
-    # Fallback to oldest available gift card if no card covers the entire amount
-    if not gift_card:
-        gift_card = db.query(GiftCard).filter(
-            GiftCard.status == "available"
-        ).order_by(GiftCard.created_at.asc()).first()
-        
-    if not gift_card:
-        # Halt Order Status, Notify User & Admin!
-        order.status = "Payment Received" # Retain status as payment received, but cannot progress
-        
-        # Log Gift Card Failure
-        err = ErrorLog(
-            type="giftcard",
-            message=f"Gift Card Exhausted! Cannot allocate card for Order: {order.id}. Order value: {total_payable}."
-        )
-        db.add(err)
-        db.commit()
-        
-        # Inform customer
-        await send_bot_message(
-            user.telegram_id,
-            f"⚠️ <b>Order Status Notification</b>\n"
-            f"Your order <code>{order.id}</code> has been accepted and is currently being processed. "
-            f"Our dispatch team has been notified and we will update you shortly!"
-        )
-        
-        # Broadcast to Admin Dashboard
-        if sse_broadcast_callback:
-            await sse_broadcast_callback({
-                "type": "error_alert",
-                "message": f"Critical: Gift card inventory is empty! Order {order.id} requires card of value ₹{total_payable:.2f}."
-            })
-            await sse_broadcast_callback({"type": "order_update", "order_id": order.id, "status": order.status})
-            
-
-        return {
-            "order_id": order.id,
-            "status": order.status,
-            "message": "Payment verified but gift card inventory empty. Order paused."
-        }
-        
-    # Allocate Gift Card successfully
-    gift_card.status = "used"
-    gift_card.used_by_user_id = user.id
-    gift_card.used_in_order_id = order.id
-    gift_card.used_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-    
-    order.gift_card_id = gift_card.id
-    
-    # Move Status to Gift Card Applied
-    order.status = "Gift Card Applied"
-    h2 = OrderStatusHistory(order_id=order.id, status="Gift Card Applied")
-    db.add(h2)
-    
-    # Instantly progress to Order Processing
+        }    # 4. Order Processing Flow (Directly move to Order Processing, no gift cards allocated)
     order.status = "Order Processing"
-    h3 = OrderStatusHistory(order_id=order.id, status="Order Processing")
-    db.add(h3)
-    
-    # Store admin audit log
-    admin_log = AuditLog(
-        admin_id=None,
-        action="GIFT_CARD_APPLIED",
-        details=json.dumps({
-            "order_id": order.id,
-            "user_id": user.id,
-            "card_id": gift_card.id,
-            "card_value": gift_card.value
-        })
-    )
-    db.add(admin_log)
+    h2 = OrderStatusHistory(order_id=order.id, status="Order Processing")
+    db.add(h2)
     db.commit()
     
     try:
@@ -1017,11 +964,6 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
         if payload.payment_method == "wallet":
             user.wallet_balance += total_payable
             
-        gift_card.status = "available"
-        gift_card.used_by_user_id = None
-        gift_card.used_in_order_id = None
-        gift_card.used_at = None
-        
         order.status = "Failed"
         h_fail = OrderStatusHistory(order_id=order.id, status="Failed", note=f"Auto-submission failed: {str(e)}")
         db.add(h_fail)
@@ -1051,8 +993,8 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
         user.telegram_id, 
         f"💳 <b>Payment Confirmed!</b>\n"
         f"We received your payment of <b>₹{total_payable:.2f}</b> for Order ID: <code>{order.id}</code> (Transaction: <code>{txn_id}</code>).\n\n"
-        f"👩‍🍳 <b>Order Status: Processing</b>\n"
-        f"Your order is now being dispatched to the kitchen. Estimated delivery in 30 minutes!"
+        f"⏳ <b>Order Status: Processing</b>\n"
+        f"Your order is now being processed. Estimated delivery in 30 minutes!"
     )
     
     # Real-time SSE updates for admin
@@ -1079,7 +1021,7 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
             "discount": discount_total,
             "service_charge": service_charge,
             "total": total_payable,
-            "gift_card": {"value": gift_card.value}
+            "gift_card": None
         }
     }
 
@@ -1656,13 +1598,19 @@ async def notify_order_status_update(order, db: Session):
         return
         
     status_emojis = {
-        "Order Accepted": "✅",
+        "Pending Approval": "⏳",
+        "Pending Payment": "💳",
+        "Payment Received": "💰",
+        "Paid": "💵",
+        "Accepted": "✅",
+        "Order Processing": "⚙️",
+        "Placed": "📝",
         "Preparing": "👩‍🍳",
         "Out for Delivery": "🛵",
         "Delivered": "📦",
         "Completed": "🎉",
         "Cancelled": "❌",
-        "Refunded": "💰"
+        "Refunded": "💸"
     }
     emoji = status_emojis.get(order.status, "🔔")
     msg_text = (
@@ -1696,7 +1644,8 @@ async def notify_order_status_update(order, db: Session):
     # If screenshot_url is set, send a photo message
     if order.screenshot_url:
         photo_url = order.screenshot_url
-        if not photo_url.startswith("http"):
+        # telegram_file:<file_id> — pass as-is to send_bot_photo (handles it natively)
+        if not photo_url.startswith("telegram_file:") and not photo_url.startswith("http"):
             base_url = os.getenv("MINI_APP_URL", "http://localhost:8000")
             # Ensure base_url has no trailing slash
             if base_url.endswith("/"):
@@ -1725,15 +1674,23 @@ async def update_order_status(
     
     order.status = new_status
     
-    # Process Refund if status changed to Refunded
-    if new_status == "Refunded" and old_status != "Refunded":
-        # Return funds to customer wallet
+    # Process Refund/Cancellation: credit wallet and log transaction
+    if new_status in ("Refunded", "Cancelled") and old_status not in ("Refunded", "Cancelled"):
         customer = db.query(User).filter(User.id == order.user_id).first()
-        if customer:
+        if customer and order.payment_method in ("wallet", "upi"):
             customer.wallet_balance += order.total_payable
+            # Write WalletTransaction ledger entry
+            refund_tx = WalletTransaction(
+                user_id=customer.id,
+                type="refund",
+                amount=order.total_payable,
+                description=f"Refund for {new_status.lower()} order #{order.id[:8]}"
+            )
+            db.add(refund_tx)
             # Audit log
             await log_admin_action(
-                db, admin.id, admin.username, "REFUND_APPROVED",
+                db, admin.id, admin.username,
+                "REFUND_APPROVED" if new_status == "Refunded" else "ORDER_CANCELLED_REFUND",
                 {"order_id": order.id, "amount": order.total_payable, "user": customer.display_name},
                 request
             )
@@ -2283,6 +2240,10 @@ async def update_user_role(
     if target_user.id == admin.id:
         raise HTTPException(status_code=400, detail="You cannot change your own role")
 
+    from .settings import settings
+    if str(target_user.telegram_id) == str(settings.ADMIN_TELEGRAM_ID):
+        raise HTTPException(status_code=400, detail="You cannot change the role of the primary administrator")
+
     old_role = target_user.role
     target_user.role = payload.role
     db.commit()
@@ -2312,6 +2273,9 @@ async def block_user(user_id: str, request: Request, payload: BlockUserRequest, 
     if blocked:
         if user.id == admin.id:
             raise HTTPException(status_code=400, detail="Admins cannot block themselves")
+        from .settings import settings
+        if str(user.telegram_id) == str(settings.ADMIN_TELEGRAM_ID):
+            raise HTTPException(status_code=400, detail="Cannot block the main administrator")
         if user.role == "admin":
             raise HTTPException(status_code=400, detail="Cannot block an admin user")
             
@@ -2924,9 +2888,16 @@ async def cancel_order(
     order.cancellation_reason = payload.reason or "Cancelled by customer"
     order.updated_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
-    # Refund wallet balance if wallet payment
-    if order.payment_method == "wallet":
+    # Refund wallet balance if wallet or upi payment, and log the transaction
+    if order.payment_method in ("wallet", "upi"):
         order.user.wallet_balance += order.total_payable
+        refund_tx = WalletTransaction(
+            user_id=user.id,
+            type="refund",
+            amount=order.total_payable,
+            description=f"Refund for cancelled order #{order.id[:8]}"
+        )
+        db.add(refund_tx)
 
     h = OrderStatusHistory(
         order_id=order_id,
@@ -3112,13 +3083,19 @@ def get_order_pdf(order_id: str, db: Session = Depends(get_db), admin: User = De
             self.set_y(-18)
             self.set_font("Helvetica", "I", 8)
             self.set_text_color(128, 128, 128)
-            self.cell(0, 5, "Domino's Order Engine Platform — Official Digital Receipt", align="C", ln=True)
+            self.cell(0, 5, "Domino's Order Engine Platform - Official Digital Receipt", align="C", ln=True)
             self.cell(0, 5, "If you need support, please contact the administrator via the Telegram Bot.", align="C", ln=True)
 
     pdf = ReceiptPDF()
     pdf.add_page()
     pdf.set_margins(15, 30, 15)
     pdf.set_y(30)
+
+    # Helper: strip/replace non-latin-1 chars to prevent fpdf encoding crashes
+    def safe_pdf(text: str, max_len: int = 80) -> str:
+        if not text:
+            return "N/A"
+        return str(text)[:max_len].encode("latin-1", "replace").decode("latin-1")
     
     # Title
     pdf.set_font("Helvetica", "B", 14)
@@ -3141,19 +3118,19 @@ def get_order_pdf(order_id: str, db: Session = Depends(get_db), admin: User = De
     
     pdf.set_font("Helvetica", "", 9)
     pdf.cell(col_w, 5, f"Date: {date_str}", ln=0)
-    pdf.cell(col_w, 5, f"Name: {order.user.display_name}", ln=1)
-    
-    pdf.cell(col_w, 5, f"Transaction ID: {order.transaction_id}", ln=0)
+    pdf.cell(col_w, 5, f"Name: {safe_pdf(order.user.display_name)}", ln=1)
+
+    pdf.cell(col_w, 5, f"Transaction ID: {safe_pdf(order.transaction_id)}", ln=0)
     pdf.cell(col_w, 5, f"Telegram ID: {order.user.telegram_id}", ln=1)
-    
+
     pdf.cell(col_w, 5, f"Payment Method: {order.payment_method.upper()}", ln=0)
     pdf.cell(col_w, 5, f"Phone: {order.phone or 'N/A'}", ln=1)
     
     if order.dominos_reference:
-        pdf.cell(col_w, 5, f"Domino's Ref: {order.dominos_reference}", ln=0)
+        pdf.cell(col_w, 5, f"Domino's Ref: {safe_pdf(order.dominos_reference)}", ln=0)
     else:
         pdf.cell(col_w, 5, "Domino's Ref: Pending Dispatch", ln=0)
-    pdf.cell(col_w, 5, f"City: {order.city or 'N/A'}", ln=1)
+    pdf.cell(col_w, 5, f"City: {safe_pdf(order.city) if order.city else 'N/A'}", ln=1)
     
     pdf.ln(5)
     
@@ -3161,7 +3138,8 @@ def get_order_pdf(order_id: str, db: Session = Depends(get_db), admin: User = De
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(0, 6, "Delivery Address", ln=True)
     pdf.set_font("Helvetica", "", 9)
-    pdf.multi_cell(0, 5, f"{order.address or 'No address provided'}\nCoordinates: Lat {order.latitude}, Lng {order.longitude}")
+    addr_safe = safe_pdf(order.address or "No address provided", max_len=200)
+    pdf.multi_cell(0, 5, f"{addr_safe}\nCoordinates: Lat {order.latitude}, Lng {order.longitude}")
     pdf.ln(5)
     
     # Items Table Header
@@ -3175,13 +3153,13 @@ def get_order_pdf(order_id: str, db: Session = Depends(get_db), admin: User = De
     # Items Table Rows
     pdf.set_font("Helvetica", "", 9)
     for item in order.items:
-        desc = item.product.name
+        desc = item.product.name if item.product else "Unknown Item"
         if item.size or item.crust:
             extras = []
             if item.size: extras.append(item.size)
             if item.crust: extras.append(item.crust)
             desc += f" ({', '.join(extras)})"
-            
+        desc = safe_pdf(desc, max_len=45)
         sub_total_item = item.price * item.quantity
         pdf.cell(90, 8, desc, border=1)
         pdf.cell(30, 8, f"INR {item.price:.2f}", border=1, align="C")
@@ -3398,7 +3376,13 @@ def get_system_audit_pdf(db: Session = Depends(get_db), admin: User = Depends(ge
 
     pdf = SystemReportPDF()
     pdf.set_margins(15, 30, 15)
-    
+
+    # Helper: strip/replace non-latin-1 chars to prevent fpdf encoding crashes
+    def safe_pdf(text, max_len: int = 80) -> str:
+        if not text:
+            return "N/A"
+        return str(text)[:max_len].encode("latin-1", "replace").decode("latin-1")
+
     # PAGE 1: Overview Dashboard
     pdf.add_page()
     pdf.set_y(30)
@@ -3432,8 +3416,8 @@ def get_system_audit_pdf(db: Session = Depends(get_db), admin: User = Depends(ge
     pdf.set_font("Helvetica", "", 8)
     for u in users[:40]:
         pdf.cell(40, 6, str(u.telegram_id), 1)
-        pdf.cell(50, 6, str(u.display_name or '—')[:25], 1)
-        pdf.cell(40, 6, str(u.phone or '—'), 1)
+        pdf.cell(50, 6, safe_pdf(u.display_name, 25), 1)
+        pdf.cell(40, 6, safe_pdf(u.phone, 20), 1)
         pdf.cell(30, 6, f"INR {u.wallet_balance:.2f}", 1, 0, "R")
         pdf.cell(20, 6, str(u.role), 1, 1, "C")
         
@@ -3453,7 +3437,7 @@ def get_system_audit_pdf(db: Session = Depends(get_db), admin: User = Depends(ge
     pdf.set_font("Helvetica", "", 8)
     for o in orders[:40]:
         pdf.cell(40, 6, str(o.id), 1)
-        pdf.cell(45, 6, str(o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '—'), 1)
+        pdf.cell(45, 6, o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else 'N/A', 1)
         pdf.cell(30, 6, f"INR {o.total_payable:.2f}", 1, 0, "R")
         pdf.cell(35, 6, str(o.payment_method), 1)
         pdf.cell(30, 6, str(o.status), 1, 1, "C")
@@ -3474,9 +3458,9 @@ def get_system_audit_pdf(db: Session = Depends(get_db), admin: User = Depends(ge
     pdf.set_font("Helvetica", "", 8)
     for w in withdrawals[:40]:
         pdf.cell(40, 6, str(w.id[:10]), 1)
-        pdf.cell(40, 6, str(w.upi_id)[:20], 1)
+        pdf.cell(40, 6, safe_pdf(w.upi_id, 20), 1)
         pdf.cell(30, 6, f"INR {w.amount:.2f}", 1, 0, "R")
-        pdf.cell(40, 6, str(w.created_at.strftime('%Y-%m-%d %H:%M') if w.created_at else '—'), 1)
+        pdf.cell(40, 6, w.created_at.strftime('%Y-%m-%d %H:%M') if w.created_at else 'N/A', 1)
         pdf.cell(30, 6, str(w.status), 1, 1, "C")
 
     pdf_bytes = pdf.output(dest="S")
@@ -3744,13 +3728,20 @@ async def update_dominos_session(
 @router.get("/admin/dominos/sessions")
 def get_dominos_sessions(db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
     sessions = db.query(DominosSession).order_by(DominosSession.created_at.desc()).all()
-    from .services.dominos_session_manager import LOGIN_COOKIES
     import datetime as _dt
 
     result = []
     for s in sessions:
         cookies_list = s.cookies or []
-        auth_cookies = [c["name"] for c in cookies_list if c.get("name") in LOGIN_COOKIES]
+        if isinstance(cookies_list, str):
+            import json
+            try:
+                cookies_list = json.loads(cookies_list)
+            except Exception:
+                cookies_list = []
+        auth_cookies = []
+        if isinstance(cookies_list, list):
+            auth_cookies = [c.get("name") for c in cookies_list if isinstance(c, dict) and c.get("name") in ("ACCESS_TOKEN", "customerId", "token")]
 
         # ── Compute health_status based on age and last verify result ──
         now = _dt.datetime.now(_dt.timezone.utc).replace(tzinfo=None)
@@ -3804,6 +3795,7 @@ def get_dominos_sessions(db: Session = Depends(get_db), admin: User = Depends(ge
             "assigned_admins": getattr(s, 'assigned_admins', ""),
             "terms_accepted": getattr(s, 'terms_accepted', False),
             "total_orders_placed": getattr(s, 'total_orders_placed', 0),
+
         })
     return result
 
@@ -4172,9 +4164,6 @@ async def delete_dominos_session(session_id: str, request: Request, db: Session 
         raise HTTPException(status_code=404, detail="Session not found")
     
     mob = session.mobile_number
-    from .services.dominos_session_manager import delete_session_resources
-    await delete_session_resources(db, session_id, mob)
-    
     db.delete(session)
     db.commit()
     await log_admin_action(db, admin.id, admin.username, "DOMINOS_SESSION_DELETED", {"session_id": session_id, "mobile_number": mob}, request)
@@ -4188,14 +4177,14 @@ async def get_dominos_session_cookies(session_id: str, db: Session = Depends(get
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     cookies_list = session.cookies or []
-    from .services.dominos_session_manager import LOGIN_COOKIES
     return {
         "cookies_json": json.dumps(cookies_list, indent=2),
         "cookie_count": len(cookies_list),
-        "auth_cookies": [c["name"] for c in cookies_list if c.get("name") in LOGIN_COOKIES],
+        "auth_cookies": [c.get("name") for c in cookies_list if isinstance(c, dict) and c.get("name") in ("ACCESS_TOKEN", "customerId", "token")],
         "mobile_number": session.mobile_number,
         "is_active": session.is_active,
     }
+
 
 @router.post("/admin/dominos/sessions/{session_id}/verify")
 async def verify_dominos_session(session_id: str, request: Request, db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
@@ -4662,6 +4651,16 @@ async def approve_payment_manually(attempt_id: str, request: Request = None, db:
         h2 = OrderStatusHistory(order_id=order.id, status="Completed")
         db.add(h2)
         
+        # Log to OrderNote
+        from .database import OrderNote
+        admin_info = f"@{admin.username} ({admin.telegram_id})" if admin.username else f"{admin.display_name} ({admin.telegram_id})"
+        note = OrderNote(
+            order_id=order.id,
+            admin_username=admin.username or admin.display_name or "admin",
+            note=f"Manual Payment Approved by admin: {admin_info}"
+        )
+        db.add(note)
+        
         audit = AuditLog(admin_id=admin.id, action="WALLET_TOPUP_APPROVED", details=json.dumps({
             "order_id": order.id,
             "utr": utr_val,
@@ -4693,6 +4692,16 @@ async def approve_payment_manually(attempt_id: str, request: Request = None, db:
     db.add(h1)
     h2 = OrderStatusHistory(order_id=order.id, status="Paid")
     db.add(h2)
+    
+    # Log to OrderNote
+    from .database import OrderNote
+    admin_info = f"@{admin.username} ({admin.telegram_id})" if admin.username else f"{admin.display_name} ({admin.telegram_id})"
+    note = OrderNote(
+        order_id=order.id,
+        admin_username=admin.username or admin.display_name or "admin",
+        note=f"Manual Payment Approved by admin: {admin_info}"
+    )
+    db.add(note)
     
     audit = AuditLog(admin_id=admin.id, action="MANUAL_PAYMENT_APPROVED", details=json.dumps({
         "order_id": order.id,
@@ -5118,6 +5127,16 @@ async def reject_payment_manually(attempt_id: str, db: Session = Depends(get_db)
     h1 = OrderStatusHistory(order_id=order.id, status="Manual Payment Rejected")
     db.add(h1)
     
+    # Log to OrderNote
+    from .database import OrderNote
+    admin_info = f"@{admin.username} ({admin.telegram_id})" if admin.username else f"{admin.display_name} ({admin.telegram_id})"
+    note = OrderNote(
+        order_id=order.id,
+        admin_username=admin.username or admin.display_name or "admin",
+        note=f"Manual Payment Rejected by admin: {admin_info}"
+    )
+    db.add(note)
+    
     audit = AuditLog(admin_id=admin.id, action="PAYMENT_REJECTED", details=json.dumps({
         "order_id": order.id,
         "utr": utr_val,
@@ -5287,6 +5306,22 @@ def get_wallet_ledger(user_id: str, offset: int = 0, limit: int = 20, db: Sessio
 # ========================
 # Telegram Bot Webhook Routes
 # ========================
+
+@router.get("/download-bot-zip")
+async def download_bot_zip():
+    """
+    Public endpoint to download the packaged telegram-pizza-app.zip file.
+    """
+    from fastapi.responses import FileResponse
+    zip_path = r"c:\Users\parth\.gemini\antigravity-ide\scratch\telegram-pizza-app\telegram-pizza-app.zip"
+    if not os.path.exists(zip_path):
+        raise HTTPException(status_code=404, detail="Zip file not found. Please recreate it.")
+    return FileResponse(
+        zip_path, 
+        media_type="application/zip", 
+        filename="telegram-pizza-app.zip"
+    )
+
 
 @router.post("/telegram-webhook")
 async def telegram_webhook(request: Request):

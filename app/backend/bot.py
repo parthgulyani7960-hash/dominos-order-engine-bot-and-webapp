@@ -16,8 +16,11 @@ import uuid
 import traceback
 import httpx
 import hashlib
+import json
+import html
+from .utils import escape_html
 from sqlalchemy.orm import Session
-from .database import SessionLocal, User, SupportMessage, ErrorLog, SystemConfig, Product, Order, OrderItem, OrderStatusHistory, GiftCard, AuditLog, LocationPricing, Notification, UTRAttempt, SavedAddress, Coupon, CouponRedemption, WalletTransaction, WithdrawalRequest
+from .database import SessionLocal, User, SupportMessage, ErrorLog, SystemConfig, Product, Order, OrderItem, OrderStatusHistory, GiftCard, AuditLog, LocationPricing, Notification, UTRAttempt, SavedAddress, Coupon, CouponRedemption, WalletTransaction, WithdrawalRequest, OrderNote, RiderAssignment, Proxy, ProxyLog, DominosSession
 try:
     from .database import UserSession, DominosSession
 except ImportError:
@@ -185,16 +188,20 @@ async def delete_bot_message(telegram_id: str, message_id: int) -> bool:
         return False
 
 
-async def answer_callback_query(callback_query_id: str, text: str = None) -> bool:
-    """Dismisses the loading spinner icon on the Telegram client button."""
+async def answer_callback_query(callback_query_id: str, text: str = None, show_alert: bool = False, url: str = None) -> bool:
+    """Dismisses the loading spinner icon on the Telegram client button. If show_alert=True, shows a popup alert instead of a toast."""
     if not BOT_TOKEN or BOT_TOKEN == "MOCK_TOKEN":
         return True
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery"
+    tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery"
     payload = {"callback_query_id": callback_query_id}
     if text:
         payload["text"] = text
+    if show_alert:
+        payload["show_alert"] = True
+    if url:
+        payload["url"] = url
     try:
-        await _fast_client.post(url, json=payload)
+        await _fast_client.post(tg_url, json=payload)
         return True
     except Exception:
         return False
@@ -292,7 +299,161 @@ async def notify_admins(db: Session, text: str, reply_markup: dict = None) -> bo
             res = await send_bot_message(tg_id, text, reply_markup)
             if not res:
                 success = False
-    return success
+async def send_admin_user_details(telegram_id: str, target_user_id: str, db: Session, message_id: int = None):
+    target_user = db.query(User).filter(User.id == target_user_id).first()
+    if not target_user:
+        await send_bot_message(telegram_id, "❌ User not found!")
+        return
+        
+    status_text = "🚫 BLOCKED (Suspended)" if target_user.is_blocked else "🟢 ACTIVE"
+    expiry_text = target_user.admin_expires_at.strftime("%Y-%m-%d %H:%M UTC") if target_user.admin_expires_at else "Permanent / N/A"
+    
+    # Advanced stats queries
+    orders_count = db.query(Order).filter(Order.user_id == target_user.id).count()
+    saved_addr = db.query(SavedAddress).filter(SavedAddress.user_id == target_user.id).first()
+    address_disp = saved_addr.full_address if (saved_addr and saved_addr.full_address) else "—"
+    
+    gps_url = f"https://www.google.com/maps?q={target_user.latitude},{target_user.longitude}" if (target_user.latitude and target_user.longitude) else None
+    gps_disp = f"<a href='{gps_url}'>🗺️ Click to View ({target_user.latitude:.6f}, {target_user.longitude:.6f})</a>" if gps_url else "—"
+    
+    # Fetch last 3 wallet transactions
+    txs = db.query(WalletTransaction).filter(WalletTransaction.user_id == target_user.id).order_by(WalletTransaction.created_at.desc()).limit(3).all()
+    txs_lines = []
+    for t in txs:
+        t_sign = "+" if t.amount >= 0 else ""
+        txs_lines.append(f"  • {t.type.upper()}: {t_sign}₹{t.amount:.2f} ({t.created_at.strftime('%Y-%m-%d')})")
+    txs_disp = "\n".join(txs_lines) if txs_lines else "  • No transactions yet"
+    
+    # Fetch last 3 orders
+    last_orders = db.query(Order).filter(Order.user_id == target_user.id).order_by(Order.created_at.desc()).limit(3).all()
+    orders_lines = []
+    for o in last_orders:
+        orders_lines.append(f"  • <code>{o.id}</code>: ₹{o.total_payable:.2f} ({o.status})")
+    orders_disp = "\n".join(orders_lines) if orders_lines else "  • No orders placed yet"
+
+    msg = (
+        f"👤 <b>User Management Console</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"• <b>Display Name:</b> {target_user.display_name}\n"
+        f"• <b>Telegram ID:</b> <code>{target_user.telegram_id}</code>\n"
+        f"• <b>Username:</b> @{target_user.username or '—'}\n"
+        f"• <b>Phone Number:</b> <code>{target_user.phone or '—'}</code>\n"
+        f"• <b>City:</b> <code>{target_user.city or '—'}</code>\n"
+        f"• <b>GPS Coordinates:</b> {gps_disp}\n"
+        f"• <b>Delivery Address:</b> <i>{address_disp}</i>\n"
+        f"• <b>Total Orders:</b> <code>{orders_count}</code>\n"
+        f"• <b>Wallet Balance:</b> <b>₹{target_user.wallet_balance:.2f}</b>\n"
+        f"• <b>Role:</b> <code>{target_user.role.upper()}</code>\n"
+        f"• <b>Status:</b> <b>{status_text}</b>\n"
+        f"• <b>Admin Expiration:</b> <code>{expiry_text}</code>\n\n"
+        f"📈 <b>Recent Transactions:</b>\n{txs_disp}\n\n"
+        f"📦 <b>Recent Orders:</b>\n{orders_disp}\n"
+    )
+    
+    block_btn_text = "🟢 Unblock User" if target_user.is_blocked else "🚫 Block User"
+    buttons = [
+        [
+            {"text": "💰 Adjust Balance", "callback_data": f"admin_user_wallet_{target_user.id}"},
+            {"text": block_btn_text, "callback_data": f"admin_user_block_{target_user.id}"}
+        ],
+        [
+            {"text": "👑 Change Role", "callback_data": f"admin_user_role_{target_user.id}"}
+        ],
+        [
+            {"text": "📜 Wallet Logs", "callback_data": f"admin_user_txs_page_{target_user.id}_1"},
+            {"text": "📦 Order History", "callback_data": f"admin_user_orders_page_{target_user.id}_1"}
+        ],
+        [
+            {"text": "📍 Saved Addresses", "callback_data": f"admin_user_addresses_{target_user.id}"}
+        ],
+        [
+            {"text": "🔙 Back to Users List", "callback_data": "admin_manage_users"}
+        ]
+    ]
+    
+    if message_id:
+        await edit_bot_message(telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+    else:
+        await send_bot_message(telegram_id, msg, reply_markup={"inline_keyboard": buttons})
+
+
+async def send_admin_order_details(telegram_id: str, order_id: str, db: Session, message_id: int = None):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        await send_bot_message(telegram_id, "❌ Order not found!")
+        return
+        
+    rider_name = order.rider.rider_name if order.rider else "None"
+    rider_phone = order.rider.rider_phone if order.rider else "None"
+    
+    rider_phone_link = f"<a href='tel:{rider_phone}'>{rider_phone}</a>" if (rider_phone and rider_phone != "None") else "None"
+    customer_phone_link = f"<a href='tel:{order.phone}'>{order.phone}</a>" if order.phone else "None"
+    
+    screenshot_disp = "—"
+    if order.screenshot_url:
+        screenshot_disp = "🖼️ Attached"
+    
+    detail_msg = (
+        f"🛒 <b>Order Editor: {order.id}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"• <b>Status:</b> <code>{order.status}</code>\n"
+        f"• <b>User:</b> {order.user.display_name} (ID: <code>{order.user.telegram_id}</code>)\n"
+        f"• <b>Customer Phone:</b> {customer_phone_link}\n"
+        f"• <b>Total Payable:</b> ₹{order.total_payable:.2f} ({order.payment_method.upper()})\n"
+        f"• <b>Domino's Ref:</b> <code>{order.dominos_reference or 'None'}</code>\n"
+        f"• <b>Sector Store:</b> <code>{order.sector_store or 'None'}</code>\n"
+        f"• <b>Rider Name:</b> <code>{rider_name}</code>\n"
+        f"• <b>Rider Phone:</b> {rider_phone_link}\n"
+        f"• <b>Screenshot/Receipt:</b> {screenshot_disp}\n"
+    )
+    
+    buttons = [
+        [
+            {"text": "✏️ Domino's Ref", "callback_data": f"admin_edit_ref_{order.id}"},
+            {"text": "✏️ Sector Store", "callback_data": f"admin_edit_store_{order.id}"}
+        ],
+        [
+            {"text": "✏️ Rider Name", "callback_data": f"admin_edit_rider_name_{order.id}"},
+            {"text": "✏️ Rider Phone", "callback_data": f"admin_edit_rider_phone_{order.id}"}
+        ],
+        [
+            {"text": "🖼️ Attach Screenshot", "callback_data": f"admin_order_attach_sc_{order.id}"},
+            {"text": "🔄 Change Status", "callback_data": f"admin_change_status_menu_{order.id}"}
+        ],
+        [
+            {"text": "🔙 Back to Orders List", "callback_data": "admin_manage_orders_menu"}
+        ]
+    ]
+    
+    if order.screenshot_url:
+        buttons.insert(3, [
+            {"text": "👁️ View Screenshot", "callback_data": f"admin_order_view_sc_{order.id}"},
+            {"text": "🗑️ Delete Screenshot", "callback_data": f"admin_order_del_sc_{order.id}"}
+        ])
+        
+    if message_id:
+        await edit_bot_message(telegram_id, message_id, detail_msg, reply_markup={"inline_keyboard": buttons})
+    else:
+        await send_bot_message(telegram_id, detail_msg, reply_markup={"inline_keyboard": buttons})
+
+
+async def broadcast_config_change_to_admins(admin_tg_id: str, parameter: str, old_val: str, new_val: str, db: Session):
+    admins = db.query(DbUser).filter(DbUser.role == "admin").all()
+    msg = (
+        f"📢 <b>System Configuration Modification Alert</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"An administrator has modified a platform parameter:\n\n"
+        f"• <b>Parameter:</b> <code>{parameter}</code>\n"
+        f"• <b>Old Value:</b> <code>{old_val}</code>\n"
+        f"• <b>New Value:</b> <code>{new_val}</code>\n\n"
+        f"Modified by Admin TG ID: <code>{admin_tg_id}</code>"
+    )
+    for a in admins:
+        if str(a.telegram_id) != str(admin_tg_id):
+            try:
+                await send_bot_message(a.telegram_id, msg)
+            except Exception:
+                pass
 
 
 def render_wallet_view(db: Session, user: User, offset: int = 0, limit: int = 5):
@@ -360,7 +521,7 @@ def render_wallet_view(db: Session, user: User, offset: int = 0, limit: int = 5)
 async def send_bot_photo(telegram_id: str, photo_url: str, caption: str = None, reply_markup: dict = None) -> bool:
     """
     Sends a photo to a Telegram user with optional inline buttons.
-    Supports either a public URL or a local file path.
+    Supports: public URL, local file path, or telegram_file:<file_id> (direct file_id).
     Falls back to send_bot_message on failure.
     """
     if not BOT_TOKEN or BOT_TOKEN == "MOCK_TOKEN":
@@ -370,10 +531,40 @@ async def send_bot_photo(telegram_id: str, photo_url: str, caption: str = None, 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
     
     import os
-    is_local_file = os.path.exists(photo_url)
+    
+    target_path = photo_url
+    if photo_url and "/uploads/" in photo_url:
+        filename = photo_url.split("/uploads/")[-1].split("?")[0]
+        possible_paths = [
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads", filename)),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads", filename)),
+            os.path.abspath(os.path.join("uploads", filename)),
+            os.path.abspath(os.path.join("app", "uploads", filename))
+        ]
+        for p in possible_paths:
+            if os.path.exists(p):
+                target_path = p
+                break
+
+    # Support telegram_file:<file_id> — pass file_id directly to Telegram API
+    is_telegram_file = str(target_path).startswith("telegram_file:")
+    is_local_file = (not is_telegram_file) and os.path.exists(target_path)
     
     try:
-        if is_local_file:
+        if is_telegram_file:
+            # Extract the raw Telegram file_id and send it directly
+            file_id = photo_url.replace("telegram_file:", "", 1).strip()
+            payload = {
+                "chat_id": telegram_id,
+                "photo": file_id,
+            }
+            if caption:
+                payload["caption"] = caption
+                payload["parse_mode"] = "HTML"
+            if reply_markup:
+                payload["reply_markup"] = reply_markup
+            resp = await _http_client.post(url, json=payload, timeout=15.0)
+        elif is_local_file:
             # Send as multipart/form-data
             data = {
                 "chat_id": telegram_id,
@@ -385,7 +576,7 @@ async def send_bot_photo(telegram_id: str, photo_url: str, caption: str = None, 
                 import json
                 data["reply_markup"] = json.dumps(reply_markup)
                 
-            with open(photo_url, "rb") as f:
+            with open(target_path, "rb") as f:
                 files = {
                     "photo": f
                 }
@@ -394,7 +585,7 @@ async def send_bot_photo(telegram_id: str, photo_url: str, caption: str = None, 
             # Send as json url link
             payload = {
                 "chat_id": telegram_id,
-                "photo": photo_url
+                "photo": target_path
             }
             if caption:
                 payload["caption"] = caption
@@ -438,6 +629,40 @@ async def send_bot_photo(telegram_id: str, photo_url: str, caption: str = None, 
         return await send_bot_message(telegram_id, fallback_text, reply_markup)
 
 
+async def send_bot_photo_bytes(telegram_id: str, image_bytes: bytes, filename: str = "image.png", caption: str = None, reply_markup: dict = None) -> bool:
+    """
+    Sends a raw image bytes buffer as a photo via Telegram's sendPhoto API (multipart upload).
+    Use this for locally-generated QR codes or any image that must NOT rely on an external URL fetch.
+    Falls back to send_bot_message on failure.
+    """
+    if not BOT_TOKEN or BOT_TOKEN == "MOCK_TOKEN":
+        logger.debug(f"[MOCK BOT PHOTO BYTES] To {telegram_id}: {filename}, Caption: {caption}")
+        return True
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+    try:
+        import io as _io
+        data = {"chat_id": str(telegram_id)}
+        if caption:
+            data["caption"] = caption
+            data["parse_mode"] = "HTML"
+        if reply_markup:
+            import json
+            data["reply_markup"] = json.dumps(reply_markup)
+
+        files = {"photo": (filename, _io.BytesIO(bytes(image_bytes)), "image/png")}
+        resp = await _http_client.post(url, data=data, files=files, timeout=20.0)
+        if resp.status_code == 200:
+            return True
+        logger.error(f"[BOT] Photo bytes upload failed (Code {resp.status_code}): {resp.text}")
+        fallback_text = caption or "Payment QR Code"
+        return await send_bot_message(telegram_id, fallback_text, reply_markup)
+    except Exception as e:
+        logger.error(f"[BOT] Photo bytes exception: {e}. Falling back to text...")
+        fallback_text = caption or "Payment QR Code"
+        return await send_bot_message(telegram_id, fallback_text, reply_markup)
+
+
 async def send_bot_document(telegram_id: str, file_bytes: bytes, filename: str, caption: str = None, reply_markup: dict = None) -> bool:
     """Sends a raw bytes file to a Telegram user as a document (e.g. PDF report, DB backup)."""
     if not BOT_TOKEN or BOT_TOKEN == "MOCK_TOKEN":
@@ -456,8 +681,9 @@ async def send_bot_document(telegram_id: str, file_bytes: bytes, filename: str, 
             import json
             data["reply_markup"] = json.dumps(reply_markup)
             
+        import io as _io
         files = {
-            "document": (filename, file_bytes, "application/octet-stream")
+            "document": (filename, _io.BytesIO(bytes(file_bytes)), "application/octet-stream")
         }
         resp = await _http_client.post(url, data=data, files=files, timeout=40.0)
         if resp.status_code == 200:
@@ -709,18 +935,20 @@ def generate_menu_composite(db: Session) -> str:
 def get_order_progress_bar(status: str) -> str:
     status_lower = status.lower() if status else ""
     if "pending" in status_lower:
-        return "⏳ <code>[▒░░░░░░░░░] 10%</code> — Payment Verification"
-    elif "received" in status_lower or "placed" in status_lower:
-        return "✅ <code>[▓░░░░░░░░░] 20%</code> — Payment Confirmed"
+        return "⏳ <code>[▒░░░░░░░░░] 10%</code> — Order Received & Pending Admin Review"
+    elif "accepted" in status_lower:
+        return "✅ <code>[▓▓░░░░░░░░] 25%</code> — Order Accepted by Admin"
+    elif "placed" in status_lower:
+        return "📝 <code>[▓▓▓▓░░░░░░] 40%</code> — Order Placed on Domino's"
     elif "processing" in status_lower or "baking" in status_lower:
-        return "🍕 <code>[▓▓▓▓░░░░░░] 40%</code> — Baking your Pizza in Oven"
+        return "🍕 <code>[▓▓▓▓▓░░░░░] 50%</code> — Processing on Domino's"
     elif "kitchen" in status_lower or "preparing" in status_lower:
-        return "👨‍🍳 <code>[▓▓▓▓▓▓░░░░] 60%</code> — Packaging & Quality Checks"
+        return "👨‍🍳 <code>[▓▓▓▓▓▓▓░░░] 70%</code> — Preparing in Kitchen"
     elif "delivery" in status_lower or "out" in status_lower or "route" in status_lower:
-        return "🛵 <code>[▓▓▓▓▓▓▓▓░░] 80%</code> — Out for Delivery with Rider"
+        return "🛵 <code>[▓▓▓▓▓▓▓▓▓░] 85%</code> — Rider is Out for Delivery"
     elif "delivered" in status_lower or "complete" in status_lower or "success" in status_lower:
-        return "🎉 <code>[▓▓▓▓▓▓▓▓▓▓] 100%</code> — Delivered! Enjoy! 🍕"
-    elif "cancel" in status_lower or "fail" in status_lower:
+        return "🎉 <code>[▓▓▓▓▓▓▓▓▓▓] 100%</code> — Delivered! Enjoy your meal! 🍕"
+    elif "cancel" in status_lower or "fail" in status_lower or "refund" in status_lower:
         return "❌ <code>[XXXXXXXXXX]</code> — Order Cancelled / Refunded"
     return f"ℹ️ {status}"
 
@@ -793,6 +1021,8 @@ def get_product_mappings(db: Session):
 
 
 async def display_delivery_location_menu(db: Session, user: User):
+    session = USER_BOT_SESSION.setdefault(user.telegram_id, {"cart": {}, "state": None})
+    session["state"] = "in_location_menu"
     coord_line = ""
     if user.latitude is not None and user.longitude is not None:
         coord_line = f"\n📡 Coords: <code>{user.latitude:.4f}, {user.longitude:.4f}</code>"
@@ -838,7 +1068,7 @@ async def display_delivery_location_menu(db: Session, user: User):
 
 
 async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: int = 1, category: str = "All", edit_message_id: int = None):
-    """Displays the menu containing all pizzas as text (complying with no images in chat) with pagination and category support."""
+    """Displays the menu containing all pizzas as rich text with full pricing, types, and category filters."""
     # Determine pricing multiplier and delivery charge based on user's location
     multiplier = 1.0
     delivery_charge = 30.0
@@ -852,55 +1082,105 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
     # Fetch all active products
     query = db.query(Product).filter(Product.availability == True)
     if category != "All":
-        query = query.filter(Product.category.ilike(category))
-    products = query.order_by(Product.original_price.asc()).all()
+        if category.lower() in ("veg", "non-veg"):
+            is_v = (category.lower() == "veg")
+            query = query.filter(Product.is_veg == is_v, ~Product.category.ilike("Sides"), ~Product.category.ilike("Desserts"), ~Product.category.ilike("Drinks"), ~Product.category.ilike("Mania"))
+        else:
+            query = query.filter(Product.category.ilike(category))
+    products = query.order_by(Product.sort_order.asc(), Product.original_price.asc()).all()
 
     if not products:
-        text = f"🍽️ No active items found in category '{category}'."
+        empty_text = (
+            f"🍽️ <b>No items found in '{category}'</b>\n\n"
+            f"Try a different category or tap <b>⭐ All</b> to see everything."
+        )
+        back_markup = {"inline_keyboard": [
+            [{"text": "⭐ All Categories", "callback_data": "menu_category_All"}],
+            [{"text": "🛒 View Cart", "callback_data": "cart_view"}]
+        ]}
         if edit_message_id:
-            await edit_bot_message(user.telegram_id, edit_message_id, text, reply_markup={"inline_keyboard": [
-                [{"text": "⭐ All Categories", "callback_data": "menu_category_All"}],
-                [{"text": "🍕 View Menu", "callback_data": "menu_view"}]
-            ]})
+            await edit_bot_message(user.telegram_id, edit_message_id, empty_text, reply_markup=back_markup)
         else:
-            await send_bot_message(user.telegram_id, text, reply_markup=reply_markup)
+            await send_bot_message(user.telegram_id, empty_text, reply_markup=back_markup)
         return
 
     # Generate mappings to get 1-based display codes
     code_to_id, id_to_code = get_product_mappings(db)
 
-    # Pagination: 4 items per page
-    items_per_page = 4
+    # Pagination: 5 items per page
+    items_per_page = 5
     total_pages = (len(products) + items_per_page - 1) // items_per_page
     page = max(1, min(page, total_pages))
-    
+
     start_idx = (page - 1) * items_per_page
     page_products = products[start_idx:start_idx + items_per_page]
 
-    # Compose unified menu text
+    # Category emoji map
+    category_emoji = {
+        "veg": "🟢", "non-veg": "🔴", "sides": "🍟",
+        "drinks": "🥤", "desserts": "🍰", "all": "🍕"
+    }
+    cat_icon = category_emoji.get(category.lower(), "🍽️")
+
+    # Compose header
+    city_display = f"📍 <b>{user.city}</b>" if user.city else "📍 <i>Location not set</i>"
+    price_note = f" · {multiplier:.1f}x pricing" if multiplier != 1.0 else ""
+    
     menu_lines = [
-        f"🍕 <b>Domino's Order Engine Menu (Page {page}/{total_pages})</b>",
-        f"📍 City: <b>{user.city}</b> (Multiplier: {multiplier:.2f}x)",
-        f"📁 Category: <b>{category}</b>",
+        f"🍕 <b>Domino's Menu</b>  —  {cat_icon} <b>{category}</b>",
+        f"{city_display}{price_note}",
+        f"📄 Page {page} of {total_pages}  ·  {len(products)} items",
         "━━━━━━━━━━━━━━━━━━━━━━\n"
     ]
-    for p in page_products:
-        price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
-        veg_indicator = "🟢 Veg" if p.is_veg else "🔴 Non-Veg"
-        display_code = id_to_code.get(p.id, p.id)
-        menu_lines.append(
-            f"🍕 <b>[{display_code}] {p.name}</b> ({veg_indicator}) — <b>₹{price:.2f}</b>\n"
-            f"<i>{p.description or 'No description available'}</i>\n"
-        )
-    
-    menu_text = "\n".join(menu_lines)
 
-    # Build inline keyboard buttons in 2-column layout
+    for p in page_products:
+        original = float(round(p.original_price * multiplier))
+        if p.discounted_price is not None:
+            effective = float(round(p.discounted_price * multiplier))
+        else:
+            effective = original
+
+        veg_dot = "🟢" if p.is_veg else "🔴"
+        display_code = id_to_code.get(p.id, "—")
+        
+        # Price display: show strikethrough original if discounted
+        if p.discounted_price is not None and p.discounted_price < p.original_price:
+            price_str = f"<s>₹{original:.0f}</s>  <b>₹{effective:.0f}</b>"
+            savings = original - effective
+            price_str += f"  <i>(Save ₹{savings:.0f}!)</i>"
+        else:
+            price_str = f"<b>₹{effective:.0f}</b>"
+
+        badges = []
+        if p.is_popular:
+            badges.append("🔥 Popular")
+        if p.is_recommended:
+            badges.append("⭐ Chef's Pick")
+        badge_str = "  " + "  ".join(badges) if badges else ""
+
+        menu_lines.append(
+            f"{veg_dot} <b>[{display_code}] {p.name}</b>{badge_str}\n"
+            f"     📁 {p.category}  ·  {price_str}\n"
+            f"     <i>{(p.description or 'Freshly made at your nearest Domino\'s store.')[:90]}</i>"
+        )
+
+    # Delivery info footer
+    menu_lines.append(
+        f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🚚 Delivery via Domino's  ·  🤖 Bot fee applies"
+    )
+
+    menu_text = "\n\n".join(menu_lines)
+
+    # Build inline keyboard: add-to-cart buttons in 2-column layout
     grid = []
     row = []
     for p in page_products:
-        name_limit = p.name[:20] + "..." if len(p.name) > 23 else p.name
-        row.append({"text": f"➕ {name_limit}", "callback_data": f"cart_add_{p.id}"})
+        original = float(round(p.original_price * multiplier))
+        effective = float(round(p.discounted_price * multiplier)) if p.discounted_price is not None else original
+        name_limit = p.name[:16] + "…" if len(p.name) > 18 else p.name
+        veg_icon = "🟢" if p.is_veg else "🔴"
+        row.append({"text": f"➕ {veg_icon} {name_limit} ₹{effective:.0f}", "callback_data": f"cart_add_{p.id}"})
         if len(row) == 2:
             grid.append(row)
             row = []
@@ -910,39 +1190,46 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
     # Pagination row
     nav_row = []
     if page > 1:
-        nav_row.append({"text": "⬅️ Prev Page", "callback_data": f"menu_page_{page-1}_{category}"})
+        nav_row.append({"text": "⬅️ Prev", "callback_data": f"menu_page_{page-1}_{category}"})
+    nav_row.append({"text": f"📄 {page}/{total_pages}", "callback_data": "menu_page_noop"})
     if page < total_pages:
-        nav_row.append({"text": "Next Page ➡️", "callback_data": f"menu_page_{page+1}_{category}"})
-    if nav_row:
-        grid.append(nav_row)
+        nav_row.append({"text": "Next ➡️", "callback_data": f"menu_page_{page+1}_{category}"})
+    grid.append(nav_row)
 
-    # Category selection rows
+    # Category filter row
     grid.append([
-        {"text": "⭐ All", "callback_data": "menu_category_All"},
-        {"text": "🟢 Veg", "callback_data": "menu_category_Veg"},
-        {"text": "🔴 Non-Veg", "callback_data": "menu_category_Non-Veg"}
+        {"text": "⭐ All",       "callback_data": "menu_category_All"},
+        {"text": "🟢 Veg",      "callback_data": "menu_category_Veg"},
+        {"text": "🔴 Non-Veg",  "callback_data": "menu_category_Non-Veg"}
     ])
     grid.append([
-        {"text": "🍟 Sides", "callback_data": "menu_category_Sides"},
-        {"text": "🥤 Drinks", "callback_data": "menu_category_Drinks"},
+        {"text": "🍕 Mania",    "callback_data": "menu_category_Mania"},
+        {"text": "🍟 Sides",    "callback_data": "menu_category_Sides"},
+        {"text": "🥤 Drinks",   "callback_data": "menu_category_Drinks"},
         {"text": "🍰 Desserts", "callback_data": "menu_category_Desserts"}
     ])
-
     grid.append([{"text": "🛒 View Shopping Cart", "callback_data": "cart_view"}])
 
     markup = {"inline_keyboard": grid}
 
     if edit_message_id:
-        await edit_bot_message(user.telegram_id, edit_message_id, menu_text, reply_markup=markup)
+        edited = await edit_bot_message(user.telegram_id, edit_message_id, menu_text, reply_markup=markup)
+        if not edited:
+            # If edit fails (content unchanged / message too old), send fresh
+            await send_bot_message(user.telegram_id, menu_text, reply_markup=markup)
     else:
-        res = await send_bot_message(user.telegram_id, menu_text, reply_markup=markup)
+        # Send animated intro GIF only on first open (not re-opens/edits)
+        gif_url = "https://media.giphy.com/media/10kxE34bJPaDPy/giphy.gif"
+        res = await send_bot_animation(user.telegram_id, gif_url, caption=menu_text, reply_markup=markup)
         if str(user.telegram_id) not in USER_BOT_SESSION:
             USER_BOT_SESSION[str(user.telegram_id)] = {"state": None, "cart": {}}
         USER_BOT_SESSION[str(user.telegram_id)]["last_bot_msg_id"] = res
 
 
 
+
 USER_LAST_PHOTO_SYNC = {}
+
 
 async def sync_user_profile_photo(telegram_id: str, user_db_id: str):
     """Fetches the user's Telegram profile photo and updates user.photo_url if changed."""
@@ -1016,35 +1303,45 @@ def render_order_confirmation_screen(db: Session, user: User, session: dict) -> 
         p = db.query(Product).filter(Product.id == pid_str).first()
         if p:
             price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
-            item_lines.append(f"  \u2022 {p.name} x{qty}" if active_deal else f"  \u2022 {p.name} x{qty} \u2014 \u20b9{price * qty:.0f}")
-    items_text = "\n".join(item_lines) if item_lines else "  \u2022 (items unavailable)"
+            veg_dot = "🟢" if p.is_veg else "🔴"
+            item_lines.append(f"  {veg_dot} {p.name} ×{qty}" if active_deal else f"  {veg_dot} {p.name} ×{qty}  —  ₹{price * qty:.0f}")
+    items_text = "\n".join(item_lines) if item_lines else "  • (items unavailable)"
+
+    # Order note (delivery_instructions)
+    order_note = session.get("order_note", "")
+    note_line = f"\n✏️ <b>Order Note:</b> <i>{order_note}</i>" if order_note else ""
+    note_btn_label = "✏️ Edit Note" if order_note else "📝 Add Note to Order"
 
     confirm_text = (
-        f"\U0001f4cb <b>Please Confirm Your Order</b>\n"
-        f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
-        f"\U0001f6d2 <b>Items:</b>\n{items_text}\n\n"
-        f"\U0001f4cd <b>City:</b> {user.city}\n"
-        f"\U0001f3e1 <b>Delivery Address:</b> {address}\n"
-        f"\U0001f4f1 <b>Phone:</b> {phone}\n\n"
-        f"\U0001f4b0 <b>Price Breakdown:</b>\n"
-        f"  Pizza Total:     \u20b9{subtotal:.2f}\n"
-        f"  Bot Service Fee: +\u20b9{bot_fee:.2f}\n"
-        f"  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
-        f"  <b>Total Payable: \u20b9{total_payable:.2f}</b>\n\n"
-        f"\U0001f4a1 <i>Wallet Balance: \u20b9{user.wallet_balance:.2f}</i>\n\nAre you sure you want to place this order?"
+        "📋 <b>Review Your Order</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🛒 <b>Items:</b>\n{items_text}\n\n"
+        f"📍 <b>City:</b> {user.city or '—'}\n"
+        f"🏠 <b>Delivery Address:</b> {address}\n"
+        f"📱 <b>Phone:</b> {phone}"
+        f"{note_line}\n\n"
+        "💰 <b>Price Breakdown:</b>\n"
+        f"  Pizza Total:      ₹{subtotal:.2f}\n"
+        f"  Bot Service Fee:  +₹{bot_fee:.2f}\n"
+        "  ─────────────────────\n"
+        f"  <b>Total Payable:  ₹{total_payable:.2f}</b>\n\n"
+        f"💳 <i>Wallet Balance: ₹{user.wallet_balance:.2f}</i>\n\n"
+        "✅ Tap <b>Confirm &amp; Place</b> to place your order!"
     )
     confirm_markup = {
         "inline_keyboard": [
             [
-                {"text": "\u2705 Yes, Confirm & Place", "callback_data": "order_confirm_place"},
-                {"text": "✏️ Edit Details",          "callback_data": "checkout_edit_details"}
+                {"text": "✅ Confirm & Place", "callback_data": "order_confirm_place"},
+                {"text": note_btn_label,       "callback_data": "checkout_add_note"}
             ],
             [
-                {"text": "\u274c Cancel Order",         "callback_data": "order_cancel_place"}
+                {"text": "✏️ Edit Details",  "callback_data": "checkout_edit_details"},
+                {"text": "❌ Cancel Order",  "callback_data": "order_cancel_place"}
             ]
         ]
     }
     return confirm_text, confirm_markup
+
 
 async def initiate_checkout(db: Session, user: User, session: dict, edit_message_id: int = None):
     """Starts or resumes the checkout flow using a unified message layout."""
@@ -1168,7 +1465,7 @@ async def initiate_checkout(db: Session, user: User, session: dict, edit_message
         return
 
 
-async def handle_bot_message(db: Session, telegram_id: str, first_name: str, last_name: str, username: str, text: str, location: dict = None, message_id: int = None):
+async def handle_bot_message(db: Session, telegram_id: str, first_name: str, last_name: str, username: str, text: str, location: dict = None, message_id: int = None, photo: list = None, document: dict = None):
     """
     Handles an incoming message sent to the Telegram bot with custom keyboards, commands, and looping GIFs.
     """
@@ -1248,6 +1545,16 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         }
     session = USER_BOT_SESSION[str(telegram_id)]
 
+    is_media = (photo is not None) or (document is not None)
+    current_state = session.get("state") or ""
+    if is_media and current_state != "waiting_for_support_message" and not current_state.startswith("admin_waiting_order_screenshot_"):
+        await send_bot_message(
+            user.telegram_id,
+            "📷 <b>Media received!</b>\n\nTo attach an image to a support message, please tap <b>📞 Contact Support</b> first. If you want to attach a screenshot to an order, please do so from the admin panel."
+        )
+        return
+
+
     if user and user.role == "admin" and user.admin_expires_at:
         if datetime.datetime.utcnow() > user.admin_expires_at:
             user.role = "user"
@@ -1277,6 +1584,101 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         prev_state = session.get("state")
         session["state"] = None
         
+        # Admin cancels an input while in Order Editor wizards
+        if prev_state and any(prev_state.startswith(x) for x in ["admin_waiting_edit_ref_", "admin_waiting_store_", "admin_waiting_rider_name_", "admin_waiting_rider_phone_", "admin_waiting_order_screenshot_", "admin_waiting_ref_"]):
+            order_id = None
+            for prefix in ["admin_waiting_edit_ref_", "admin_waiting_store_", "admin_waiting_rider_name_", "admin_waiting_rider_phone_", "admin_waiting_order_screenshot_", "admin_waiting_ref_"]:
+                if prev_state.startswith(prefix):
+                    order_id = prev_state.replace(prefix, "").strip()
+                    break
+            if order_id:
+                await send_bot_message(user.telegram_id, "❌ Action cancelled.", reply_markup=main_keyboard)
+                await send_admin_order_details(user.telegram_id, order_id, db)
+                return
+                
+        elif prev_state and prev_state.startswith("admin_waiting_wallet_adj_"):
+            target_id = prev_state.replace("admin_waiting_wallet_adj_", "").strip()
+            target_user = db.query(User).filter(User.id == target_id).first()
+            if target_user:
+                await send_bot_message(user.telegram_id, "❌ Action cancelled.", reply_markup=main_keyboard)
+                
+                # Show user details console
+                await send_admin_user_details(user.telegram_id, target_user.id, db)
+                return
+                
+        elif prev_state in ("admin_waiting_promo_code", "admin_waiting_promo_value", "admin_waiting_promo_limit"):
+            await send_bot_message(user.telegram_id, "❌ Action cancelled.", reply_markup=main_keyboard)
+            
+            # Show promo code menu
+            limit = 5
+            offset = 0
+            total_coupons = db.query(Coupon).count()
+            import math
+            total_pages = max(1, math.ceil(total_coupons / limit))
+            coupons = db.query(Coupon).order_by(Coupon.created_at.desc()).offset(offset).limit(limit).all()
+            
+            msg = f"🎟️ <b>Promo Codes Management (Page 1/{total_pages}):</b>\n\n"
+            buttons = []
+            if not coupons:
+                msg += "<i>No promo codes created yet.</i>\n"
+            else:
+                for c in coupons:
+                    status = "🟢 Active" if (c.is_active and c.redeemed_count < c.usage_limit) else "🔴 Inactive"
+                    msg += f"• <b>Code:</b> <code>{c.code}</code>\n  Value: ₹{c.value:.2f} | Limit: {c.redeemed_count}/{c.usage_limit} | Status: {status}\n\n"
+                    buttons.append([
+                        {"text": f"❌ Delete {c.code}", "callback_data": f"admin_promo_delete_{c.id}"}
+                    ])
+            nav_row = []
+            if total_pages > 1:
+                nav_row.append({"text": "Next ➡️", "callback_data": "admin_promo_page_2"})
+            if nav_row:
+                buttons.append(nav_row)
+            buttons.append([
+                {"text": "➕ Create Promo Code", "callback_data": "admin_promo_create"},
+                {"text": "🔙 Back", "callback_data": "admin_refresh_stats"}
+            ])
+            await send_bot_message(user.telegram_id, msg, reply_markup={"inline_keyboard": buttons})
+            return
+            
+        elif prev_state in ("admin_waiting_upi_id", "admin_waiting_upi_name"):
+            await send_bot_message(user.telegram_id, "❌ Action cancelled.", reply_markup=main_keyboard)
+            
+            # Show system config panel
+            upi_id_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
+            upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
+            maint_cfg = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
+            upi_id = upi_id_cfg.value if upi_id_cfg else "dominos@upi"
+            upi_name = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
+            maint_val = maint_cfg.value if maint_cfg else "false"
+            maint_status = "⚠️ MAINTENANCE ON" if maint_val == "true" else "🟢 ONLINE"
+            
+            msg = (
+                f"⚙️ <b>System Configuration Control Panel</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"• <b>UPI ID:</b> <code>{upi_id}</code>\n"
+                f"• <b>UPI Name:</b> <code>{upi_name}</code>\n"
+                f"• <b>Platform Status:</b> <code>{maint_status}</code>\n\n"
+                f"<i>Use the settings below to adjust system parameters directly in real-time:</i>"
+            )
+            buttons = [
+                [
+                    {"text": "💳 Update UPI ID", "callback_data": "admin_conf_upi_id"},
+                    {"text": "👤 Update UPI Name", "callback_data": "admin_conf_upi_name"}
+                ],
+                [
+                    {"text": "🛠️ Toggle Maintenance", "callback_data": "admin_toggle_maintenance"}
+                ],
+                [
+                    {"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}
+                ]
+            ]
+            await send_bot_message(user.telegram_id, msg, reply_markup={"inline_keyboard": buttons})
+            return
+            
+        elif prev_state and prev_state.startswith("waiting_for_utr_"):
+            await send_bot_message(user.telegram_id, "❌ Action cancelled.", reply_markup=main_keyboard)
+            return
+
         # Fallback to checkout details if we were in checkout
         if session.get("checkout_pending") or prev_state in ("waiting_for_address", "waiting_for_phone", "waiting_for_confirm"):
             session["checkout_pending"] = False
@@ -1290,8 +1692,8 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 await initiate_checkout(db, user, session)
             return
             
-        # Fallback to location settings menu if we were updating location details
-        if prev_state in ("waiting_for_city", "waiting_for_address", "waiting_for_phone_update"):
+        # Fallback to location settings menu if we were updating location details (sub-views)
+        if prev_state in ("waiting_for_address", "waiting_for_phone_update"):
             await display_delivery_location_menu(db, user)
             return
             
@@ -1612,14 +2014,74 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 pass
         return
 
-    # --- 1.5 (UTR state removed - deposits are now verified by Top-Up ID only) ---
+    # --- UTR Auto-detection ---
+    if text_clean.isdigit() and len(text_clean) == 12:
+        pending_order = db.query(Order).filter(
+            Order.user_id == user.id,
+            Order.status.in_(["Pending Payment", "Payment Pending"])
+        ).order_by(Order.created_at.desc()).first()
+        if pending_order:
+            pending_order.transaction_id = text_clean
+            pending_order.status = "Pending Verification"
+            
+            attempt = UTRAttempt(order_id=pending_order.id, utr=text_clean, is_successful=False)
+            db.add(attempt)
+            db.commit()
+            
+            await send_bot_message(
+                user.telegram_id,
+                f"✅ <b>UTR Associated!</b>\n\nYour UTR <code>{text_clean}</code> has been linked to order <code>{pending_order.id}</code> for verification."
+            )
+            
+            # Notify admins of the payment verification request
+            if pending_order.id.startswith("TOPUP-"):
+                admin_text = (
+                    "🔔 <b>New Deposit Marked as Paid (Via UTR)</b>\n\n"
+                    f"👤 <b>User:</b> {user.display_name} (ID: {user.telegram_id})\n"
+                    f"💰 <b>Amount:</b> ₹{pending_order.total_payable:.2f}\n"
+                    f"🆔 <b>Ref ID:</b> <code>{pending_order.id}</code>\n"
+                    f"🔢 <b>UTR:</b> <code>{text_clean}</code>"
+                )
+                admin_markup = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "✅ Approve", "callback_data": f"admin_dep_approve_{pending_order.id}"},
+                            {"text": "❌ Reject", "callback_data": f"admin_dep_reject_{pending_order.id}"}
+                        ]
+                    ]
+                }
+                await notify_admins(db, admin_text, reply_markup=admin_markup)
+            else:
+                admin_text = (
+                    "⚠️ <b>New Order Placed (Manual Admin Action Required):</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"🆔 <b>Order ID:</b> <code>{pending_order.id}</code>\n"
+                    f"👤 <b>User:</b> {user.display_name} (ID: <code>{user.telegram_id}</code>)\n"
+                    f"💰 <b>Total Paid:</b> ₹{pending_order.total_payable:.2f}\n"
+                    f"🔢 <b>UTR Number:</b> <code>{text_clean}</code>\n"
+                    f"🏡 <b>Address:</b> <code>{pending_order.address}</code>\n"
+                    f"📱 <b>Phone:</b> <code>{pending_order.phone}</code>\n"
+                    f"📍 <b>GPS Coordinates:</b> <a href='https://www.google.com/maps?q={user.latitude},{user.longitude}'>🗺️ View on Google Maps ({user.latitude:.6f}, {user.longitude:.6f})</a>\n\n"
+                    "👩‍🍳 <b>Actions:</b>"
+                )
+                action_markup = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "✅ Accept & Complete", "callback_data": f"admin_act_complete_{pending_order.id}"},
+                            {"text": "❌ Reject & Refund", "callback_data": f"admin_act_reject_{pending_order.id}"}
+                        ],
+                        [
+                            {"text": "💬 Reply to Customer", "callback_data": f"admin_reply_support_{user.telegram_id}"}
+                        ]
+                    ]
+                }
+                await notify_admins(db, admin_text, reply_markup=action_markup)
+            return
 
-    # --- 2. (UTR auto-detection removed - Top-Up ID based verification only) ---
-
-    if session.get("state") == "waiting_for_city":
+    if session.get("state") in ("waiting_for_city", "in_location_menu"):
         city_buttons = [
             "❌ skip location", "🍕 view menu", "💰 my wallet", "📦 track orders",
-            "📍 change location", "❌ cancel", "🏠 update delivery address", "📱 update phone number"
+            "📍 change location", "❌ cancel", "🏠 update delivery address", "📱 update phone number", "🔙 back"
         ]
         if text and text.strip().lower() in city_buttons:
             pass  # Fall through to main button routing
@@ -1748,17 +2210,34 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
 
     if session.get("state") == "waiting_for_support_message":
         msg_text = text.strip() if text else ""
-        if len(msg_text) < 10:
+        if not photo and not document and len(msg_text) < 10:
             await send_bot_message(
                 user.telegram_id,
                 "⚠️ <b>Message too short.</b>\n\nPlease describe your issue in at least 10 characters so we can help you.",
             )
             return
+        
+        file_id = None
+        attachment_type = None
+        if photo:
+            largest = max(photo, key=lambda p: p.get("file_size", 0))
+            file_id = largest["file_id"]
+            attachment_type = "photo"
+            if not msg_text:
+                msg_text = "[Image Attachment]"
+        elif document:
+            file_id = document.get("file_id")
+            attachment_type = "document"
+            if not msg_text:
+                msg_text = f"[Document: {document.get('file_name', 'Attachment')}]"
+                
         try:
             sup = SupportMessage(
                 user_id=user.id,
                 sender_type="user",
-                message=msg_text
+                message=msg_text,
+                attachment_file_id=file_id,
+                attachment_type=attachment_type
             )
             db.add(sup)
             db.commit()
@@ -1768,7 +2247,8 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                         "type": "support_message",
                         "user_id": user.id,
                         "message": msg_text,
-                        "display_name": user.display_name
+                        "display_name": user.display_name,
+                        "has_attachment": file_id is not None
                     })
                 except Exception:
                     pass
@@ -1818,13 +2298,44 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 ]
             ]
         }
-        await send_bot_message(admin_tg_id, admin_ticket_text, reply_markup=admin_ticket_markup)
+        if file_id:
+            await send_bot_photo(admin_tg_id, file_id, caption=admin_ticket_text, reply_markup=admin_ticket_markup)
+        else:
+            await send_bot_message(admin_tg_id, admin_ticket_text, reply_markup=admin_ticket_markup)
         return
 
     if session.get("state") == "waiting_for_promo_code":
         # Code was entered but not valid — the actual validation happens in promo_candidate block above
         await send_bot_message(user.telegram_id, "❌ Invalid or expired promo code. Please double-check the code and try again, or send /start to cancel.")
         return
+
+    if session.get("state") == "waiting_for_order_note":
+        note_text = text.strip() if text else ""
+        if len(note_text) > 300:
+            await send_bot_message(
+                user.telegram_id,
+                "⚠️ <b>Note too long.</b>\n\nPlease keep your order note under 300 characters.",
+                reply_markup={"keyboard": [[{"text": "❌ Cancel"}]], "resize_keyboard": True, "one_time_keyboard": True}
+            )
+            return
+        if note_text.lower() in ("cancel", "skip", "❌ cancel"):
+            session["state"] = "waiting_for_confirm"
+            session["order_note"] = ""
+            confirm_text, confirm_markup = render_order_confirmation_screen(db, user, session)
+            await send_bot_message(user.telegram_id, confirm_text, reply_markup=confirm_markup)
+            return
+        
+        session["order_note"] = note_text
+        session["state"] = "waiting_for_confirm"
+        confirm_text, confirm_markup = render_order_confirmation_screen(db, user, session)
+        await send_bot_message(
+            user.telegram_id,
+            f"✅ <b>Note saved!</b>\n\n📝 <i>\"{note_text[:100]}{'...' if len(note_text) > 100 else ''}\"</i>\n\nHere's your updated order summary:",
+        )
+        await send_bot_message(user.telegram_id, confirm_text, reply_markup=confirm_markup)
+        return
+
+
 
     if session.get("state") == "waiting_for_address":
         addr_stripped = text.strip() if text else ""
@@ -1900,6 +2411,89 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             await display_delivery_location_menu(db, user)
         return
 
+    elif session.get("state") and session.get("state").startswith("admin_waiting_order_screenshot_"):
+        if not is_admin:
+            await send_bot_message(user.telegram_id, "❌ Unauthorized!")
+            return
+        order_id = session.get("state").replace("admin_waiting_order_screenshot_", "").strip()
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order:
+            await send_bot_message(user.telegram_id, "❌ Order not found!")
+            session["state"] = None
+            return
+            
+        file_id = None
+        if photo:
+            largest = max(photo, key=lambda p: p.get("file_size", 0))
+            file_id = largest["file_id"]
+        elif document:
+            file_id = document.get("file_id")
+            
+        if not file_id:
+            await send_bot_message(user.telegram_id, "❌ Please send/upload a photo or document screenshot to attach to the order:")
+            return
+            
+        order.screenshot_url = f"telegram_file:{file_id}"
+        db.commit()
+        
+        session["state"] = None
+        await send_bot_message(user.telegram_id, f"✅ <b>Receipt screenshot attached successfully to order {order_id}!</b>", reply_markup=main_keyboard)
+        await send_admin_order_details(user.telegram_id, order_id, db)
+        return
+
+    elif session.get("state") == "admin_waiting_manual_credit_user":
+        if not is_admin:
+            await send_bot_message(user.telegram_id, "❌ Unauthorized!")
+            return
+        search_query = text.strip()
+        clean_q = search_query.lstrip("@").strip()
+        
+        from sqlalchemy import or_
+        matched_users = db.query(DbUser).filter(
+            or_(
+                DbUser.id == clean_q,
+                DbUser.telegram_id == clean_q,
+                DbUser.username.like(f"%{clean_q}%"),
+                DbUser.display_name.like(f"%{clean_q}%")
+            )
+        ).limit(10).all()
+        
+        if not matched_users:
+            await send_bot_message(
+                user.telegram_id,
+                f"❌ <b>No users found matching:</b> <code>{search_query}</code>. Please try again or type ❌ Cancel:",
+            )
+            return
+            
+        if len(matched_users) == 1:
+            target_user = matched_users[0]
+            session["state"] = f"admin_waiting_wallet_adj_{target_user.id}"
+            cancel_keyboard = {
+                "keyboard": [[{"text": "❌ Cancel"}]],
+                "resize_keyboard": True,
+                "one_time_keyboard": True
+            }
+            await send_bot_message(
+                user.telegram_id,
+                f"💰 <b>Adjust Wallet Balance:</b>\n\n"
+                f"👤 User: <b>{target_user.display_name}</b>\n"
+                f"• Current Balance: <b>₹{target_user.wallet_balance:.2f}</b>\n\n"
+                f"Please enter the amount to adjust (e.g. <code>+500</code> to credit or <code>-250</code> to debit):",
+                reply_markup=cancel_keyboard
+            )
+            return
+            
+        msg = f"🔍 <b>Multiple matches found for:</b> <code>{search_query}</code>\n\nSelect a user below to adjust balance:\n\n"
+        buttons = []
+        for u in matched_users:
+            msg += f"• <b>{u.display_name}</b> (Balance: ₹{u.wallet_balance:.2f} | ID: <code>{u.id}</code>)\n"
+            buttons.append([{"text": f"💰 Credit {u.display_name[:15]}", "callback_data": f"admin_user_wallet_{u.id}"}])
+            
+        buttons.append([{"text": "🔙 Back to Payment Management", "callback_data": "admin_payment_management"}])
+        await send_bot_message(user.telegram_id, msg, reply_markup={"inline_keyboard": buttons})
+        session["state"] = None
+        return
+
     elif session.get("state") == "waiting_for_topup_amount":
         try:
             amount = float(text_clean)
@@ -1968,14 +2562,16 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         db.commit()
         
         session["state"] = None
-        await send_bot_message(
-            user.telegram_id,
+        notify_msg = (
             f"✅ <b>Wallet balance adjusted successfully!</b>\n\n"
             f"👤 User: <b>{target_user.display_name}</b>\n"
             f"• Amount: <b>{'+' if amount >= 0 else ''}{amount:.2f}</b>\n"
-            f"• New Balance: <b>₹{target_user.wallet_balance:.2f}</b>",
-            reply_markup=main_keyboard
+            f"• New Balance: <b>₹{target_user.wallet_balance:.2f}</b>"
         )
+        await send_bot_message(user.telegram_id, notify_msg, reply_markup=main_keyboard)
+        
+        # Show user details console
+        await send_admin_user_details(user.telegram_id, target_user.id, db)
         
         # Notify target user if they have started the bot
         try:
@@ -2070,6 +2666,36 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             f"• Usage Limit: <b>{limit}</b>",
             reply_markup=main_keyboard
         )
+        
+        # Show promo code menu
+        limit_count = 5
+        offset = 0
+        total_coupons = db.query(Coupon).count()
+        import math
+        total_pages = max(1, math.ceil(total_coupons / limit_count))
+        coupons = db.query(Coupon).order_by(Coupon.created_at.desc()).offset(offset).limit(limit_count).all()
+        
+        msg = f"🎟️ <b>Promo Codes Management (Page 1/{total_pages}):</b>\n\n"
+        buttons = []
+        if not coupons:
+            msg += "<i>No promo codes created yet.</i>\n"
+        else:
+            for c in coupons:
+                status = "🟢 Active" if (c.is_active and c.redeemed_count < c.usage_limit) else "🔴 Inactive"
+                msg += f"• <b>Code:</b> <code>{c.code}</code>\n  Value: ₹{c.value:.2f} | Limit: {c.redeemed_count}/{c.usage_limit} | Status: {status}\n\n"
+                buttons.append([
+                    {"text": f"❌ Delete {c.code}", "callback_data": f"admin_promo_delete_{c.id}"}
+                ])
+        nav_row = []
+        if total_pages > 1:
+            nav_row.append({"text": "Next ➡️", "callback_data": "admin_promo_page_2"})
+        if nav_row:
+            buttons.append(nav_row)
+        buttons.append([
+            {"text": "➕ Create Promo Code", "callback_data": "admin_promo_create"},
+            {"text": "🔙 Back", "callback_data": "admin_refresh_stats"}
+        ])
+        await send_bot_message(user.telegram_id, msg, reply_markup={"inline_keyboard": buttons})
         return
 
     elif session.get("state") == "admin_waiting_upi_id":
@@ -2081,6 +2707,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             await send_bot_message(user.telegram_id, "❌ Invalid UPI ID format. It must contain the '@' symbol (e.g. <code>merchant@bank</code>). Please try again:")
             return
         cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
+        old_val = cfg.value if cfg else "None"
         if not cfg:
             cfg = SystemConfig(key="upi_id", value=upi_id)
             db.add(cfg)
@@ -2089,11 +2716,46 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         db.commit()
         session["state"] = None
         
+        # Broadcast configuration update to other admins
+        asyncio.create_task(broadcast_config_change_to_admins(user.telegram_id, "UPI ID", old_val, upi_id, db))
+        
         await send_bot_message(
             user.telegram_id,
             f"✅ <b>Merchant UPI ID updated successfully!</b>\n\n• New UPI ID: <code>{upi_id}</code>",
             reply_markup=main_keyboard
         )
+        
+        # Show system config panel
+        upi_id_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
+        upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
+        maint_cfg = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
+        
+        upi_id_val = upi_id_cfg.value if upi_id_cfg else "dominos@upi"
+        upi_name_val = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
+        maint_val = maint_cfg.value if maint_cfg else "false"
+        maint_status = "⚠️ MAINTENANCE ON" if maint_val == "true" else "🟢 ONLINE"
+        
+        msg = (
+            f"⚙️ <b>System Configuration Control Panel</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"• <b>UPI ID:</b> <code>{upi_id_val}</code>\n"
+            f"• <b>UPI Name:</b> <code>{upi_name_val}</code>\n"
+            f"• <b>Platform Status:</b> <code>{maint_status}</code>\n\n"
+            f"<i>Use the settings below to adjust system parameters directly in real-time:</i>"
+        )
+        buttons = [
+            [
+                {"text": "💳 Update UPI ID", "callback_data": "admin_conf_upi_id"},
+                {"text": "👤 Update UPI Name", "callback_data": "admin_conf_upi_name"}
+            ],
+            [
+                {"text": "🛠️ Toggle Maintenance", "callback_data": "admin_toggle_maintenance"}
+            ],
+            [
+                {"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}
+            ]
+        ]
+        await send_bot_message(user.telegram_id, msg, reply_markup={"inline_keyboard": buttons})
         return
 
     elif session.get("state") == "admin_waiting_upi_name":
@@ -2105,6 +2767,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             await send_bot_message(user.telegram_id, "❌ Invalid merchant name. Please enter a valid name (minimum 2 characters):")
             return
         cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
+        old_val = cfg.value if cfg else "None"
         if not cfg:
             cfg = SystemConfig(key="upi_name", value=upi_name)
             db.add(cfg)
@@ -2113,11 +2776,46 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         db.commit()
         session["state"] = None
         
+        # Broadcast configuration update to other admins
+        asyncio.create_task(broadcast_config_change_to_admins(user.telegram_id, "UPI Display Name", old_val, upi_name, db))
+        
         await send_bot_message(
             user.telegram_id,
             f"✅ <b>Merchant UPI Display Name updated successfully!</b>\n\n• New Display Name: <code>{upi_name}</code>",
             reply_markup=main_keyboard
         )
+        
+        # Show system config panel
+        upi_id_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
+        upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
+        maint_cfg = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
+        
+        upi_id_val = upi_id_cfg.value if upi_id_cfg else "dominos@upi"
+        upi_name_val = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
+        maint_val = maint_cfg.value if maint_cfg else "false"
+        maint_status = "⚠️ MAINTENANCE ON" if maint_val == "true" else "🟢 ONLINE"
+        
+        msg = (
+            f"⚙️ <b>System Configuration Control Panel</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"• <b>UPI ID:</b> <code>{upi_id_val}</code>\n"
+            f"• <b>UPI Name:</b> <code>{upi_name_val}</code>\n"
+            f"• <b>Platform Status:</b> <code>{maint_status}</code>\n\n"
+            f"<i>Use the settings below to adjust system parameters directly in real-time:</i>"
+        )
+        buttons = [
+            [
+                {"text": "💳 Update UPI ID", "callback_data": "admin_conf_upi_id"},
+                {"text": "👤 Update UPI Name", "callback_data": "admin_conf_upi_name"}
+            ],
+            [
+                {"text": "🛠️ Toggle Maintenance", "callback_data": "admin_toggle_maintenance"}
+            ],
+            [
+                {"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}
+            ]
+        ]
+        await send_bot_message(user.telegram_id, msg, reply_markup={"inline_keyboard": buttons})
         return
 
     elif session.get("state") == "admin_waiting_search_order_id":
@@ -2543,7 +3241,32 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
 
     text_lower = text.strip().lower()
 
-    if text_clean.startswith("/admin_msg "):
+    if text_lower == "/secret_key":
+        if not is_admin:
+            await send_bot_message(user.telegram_id, "❌ <b>Unauthorized!</b> This command is restricted to the administrator.")
+            return
+            
+        import secrets
+        session_key = secrets.token_hex(32)
+        
+        cfg = db.query(SystemConfig).filter(SystemConfig.key == "admin_session_key").first()
+        if not cfg:
+            cfg = SystemConfig(key="admin_session_key", value=session_key)
+            db.add(cfg)
+        else:
+            cfg.value = session_key
+        db.commit()
+        
+        await send_bot_message(
+            user.telegram_id,
+            f"🔑 <b>Admin Session Key Generated!</b>\n\n"
+            f"Use this temporary session key to log in to the admin portal:\n"
+            f"<code>{session_key}</code>\n\n"
+            f"<i>Keep this key secret. Generating a new key invalidates the previous one.</i>"
+        )
+        return
+
+    elif text_clean.startswith("/admin_msg "):
         if not is_admin:
             await send_bot_message(user.telegram_id, "❌ <b>Unauthorized!</b> This command is restricted to the administrator.")
             return
@@ -3126,7 +3849,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         return
 
     elif text_lower == "💬 contact support" or text.startswith("/support"):
-        session["state"] = None  # Clear any pending state
+        session["state"] = "waiting_for_support_message"  # Enable support message entry
         support_help = (
             "💬 <b>Contact Support</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -3424,19 +4147,46 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         return
 
     else:
-        # Unknown message — show a helpful guide rather than silently logging as support.
-        # Support is only triggered via the explicit "💬 Contact Support" button.
+        msg_text = text.strip() if text else ""
+        # Filter out short noise / greetings / single-word typos from creating support tickets
+        ignored_words = ("hi", "hello", "hey", "test", "ok", "menu", "pizza", "help", "start", "admin", "back", "cancel")
+        if len(msg_text) < 8 or msg_text.lower() in ignored_words:
+            session["state"] = None
+            help_reply = (
+                f"❓ <b>I have not recognized your message.</b>\n\n"
+                f"Kindly click one of the menu buttons below to navigate, view pizzas, or manage your order.\n\n"
+                f"<i>If you need assistance or want a custom order, tap <b>💬 Contact Support</b> in the menu or type /support.</i>"
+            )
+            await send_bot_message(user.telegram_id, help_reply, reply_markup=main_keyboard)
+            return
+
+        # Descriptive text: save as support message
+        try:
+            sup = SupportMessage(
+                user_id=user.id,
+                sender_type="user",
+                message=msg_text
+            )
+            db.add(sup)
+            db.commit()
+            if sse_broadcast_callback:
+                try:
+                    await sse_broadcast_callback({
+                        "type": "support_message",
+                        "user_id": user.id,
+                        "message": msg_text,
+                        "display_name": user.display_name
+                    })
+                except Exception:
+                    pass
+        except Exception as db_err:
+            logger.warning(f"Could not save fallback support message: {db_err}")
+
         await send_bot_message(
             user.telegram_id,
-            f"🤖 <b>I didn't understand that.</b>\n\n"
-            f"Use the menu buttons below to navigate:\n\n"
-            f"• 🍕 <b>View Menu</b> — Browse & add items\n"
-            f"• 🛒 <b>Cart</b> — View your cart & checkout\n"
-            f"• 💰 <b>My Wallet</b> — Check balance, add funds\n"
-            f"• 📍 <b>Change Location</b> — Update GPS & delivery address\n"
-            f"• 📦 <b>Track Orders</b> — Check order status\n"
-            f"• 💬 <b>Contact Support</b> — Send us a support message\n\n"
-            f"<i>Type /start to restart the bot.</i>",
+            "✅ <b>Support message sent!</b>\n\n"
+            "Our team has received your message and will reply directly in this chat shortly.\n\n"
+            "<i>Your message:</i>\n" + f"<blockquote>{escape_html(msg_text[:300])}</blockquote>",
             reply_markup=main_keyboard
         )
         return
@@ -3624,6 +4374,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             return
         await display_pizza_menu(db, user, main_keyboard, page=1, category="All", edit_message_id=message_id)
         await answer_callback_query(callback_query_id)
+        
+    elif data == "menu_page_noop":
+        await answer_callback_query(callback_query_id)
+        return
         
     elif data.startswith("menu_page_"):
         parts = data.split("_")
@@ -3950,11 +4704,35 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         )
         await answer_callback_query(callback_query_id)
 
+    elif data == "checkout_clear_note":
+        session["order_note"] = ""
+        session["state"] = "waiting_for_confirm"
+        await answer_callback_query(callback_query_id, "Note removed.")
+        confirm_text, confirm_markup = render_order_confirmation_screen(db, user, session)
+        await edit_bot_message(user.telegram_id, message_id, confirm_text, reply_markup=confirm_markup)
+        return
+
     elif data == "checkout_edit_details":
         session["force_address_entry"] = True
         await initiate_checkout(db, user, session, edit_message_id=message_id)
         await answer_callback_query(callback_query_id)
         return
+
+    elif data == "checkout_add_note":
+        session["state"] = "waiting_for_order_note"
+        current_note = session.get("order_note", "")
+        hint = f"\n\n<i>Current note:</i>\n<blockquote>{current_note}</blockquote>" if current_note else ""
+        await answer_callback_query(callback_query_id)
+        await edit_bot_message(
+            user.telegram_id, message_id,
+            f"📝 <b>Add a Note to Your Order</b>\n\n"
+            f"Type any special delivery instructions, preferences, or notes for the delivery agent:{hint}\n\n"
+            f"<i>Examples: \"Please ring the bell\", \"Leave at door\", \"Extra napkins please\", \"No onions\"</i>",
+            reply_markup={"inline_keyboard": [[{"text": "❌ Skip / Remove Note", "callback_data": "checkout_clear_note"}]]}
+        )
+        return
+
+
 
     elif data == "checkout_enter_new":
         session["state"] = "waiting_for_address"
@@ -4090,6 +4868,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         upi_details = generate_upi_qr_details(upi_id, upi_name, order.total_payable, order.id, f"Order {order.id}")
         upi_uri = upi_details["upi_uri"]
         qr_url = upi_details["qr_code_url"]
+        qr_data_url = upi_details.get("qr_data_url", "")
         
         payment_text = (
             f"💳 <b>UPI Payment Request</b>\n"
@@ -4109,7 +4888,13 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             ]
         }
         
-        await send_bot_photo(user.telegram_id, qr_url, payment_text, reply_markup=payment_markup)
+        # Send locally-generated QR PNG bytes directly — no external URL fetch needed
+        if qr_data_url and qr_data_url.startswith("data:image/png;base64,"):
+            import base64 as _b64
+            qr_png_bytes = _b64.b64decode(qr_data_url.split(",", 1)[1])
+            await send_bot_photo_bytes(user.telegram_id, qr_png_bytes, "upi_qr.png", payment_text, reply_markup=payment_markup)
+        else:
+            await send_bot_photo(user.telegram_id, qr_url, payment_text, reply_markup=payment_markup)
         await answer_callback_query(callback_query_id)
         return
 
@@ -4257,6 +5042,102 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await edit_bot_message(user.telegram_id, message_id, wallet_text, reply_markup=wallet_markup)
         await answer_callback_query(callback_query_id)
 
+    elif data == "admin_payment_management":
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+            
+        pending_deposits_count = db.query(Order).filter(Order.id.like("TOPUP-%"), Order.status == "Pending Verification").count()
+        
+        today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_completed_orders = db.query(Order).filter(
+            Order.status == "Completed",
+            Order.created_at >= today_start
+        ).all()
+        today_revenue = sum(o.total_payable for o in today_completed_orders)
+        
+        msg = (
+            "🏦 <b>Payment & Deposit Management Center</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"• <b>Pending Deposits:</b> <code>{pending_deposits_count}</code>\n"
+            f"• <b>Today's Revenue:</b> <code>₹{today_revenue:.2f}</code>\n\n"
+            "Select an option below to process deposits, view history, or issue manual credits:"
+        )
+        
+        buttons = [
+            [
+                {"text": "📥 Pending Deposits", "callback_data": "admin_view_pending_deposits"},
+                {"text": "📜 Deposit History", "callback_data": "admin_deposit_history_page_1"}
+            ],
+            [
+                {"text": "💰 Manual Wallet Credit", "callback_data": "admin_payment_manual_credit_start"}
+            ],
+            [
+                {"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}
+            ]
+        ]
+        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data.startswith("admin_deposit_history_page_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        page = int(data.replace("admin_deposit_history_page_", "").strip())
+        limit = 5
+        offset = (page - 1) * limit
+        
+        query = db.query(Order).filter(Order.id.like("TOPUP-%"))
+        total_count = query.count()
+        total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
+        page = max(1, min(page, total_pages))
+        
+        deposits = query.order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
+        
+        msg = f"📜 <b>Deposit Transaction History (Page {page}/{total_pages}):</b>\n\n"
+        for d in deposits:
+            status_emoji = "🟢" if d.status == "Completed" else "🟡" if d.status == "Pending Verification" else "🔴"
+            utr_lbl = f"UTR: {d.transaction_id}" if d.transaction_id else "No UTR"
+            date_str = d.created_at.strftime("%Y-%m-%d %H:%M") if d.created_at else "—"
+            msg += f"{status_emoji} <code>{d.id}</code> — <b>₹{d.total_payable:.2f}</b> ({d.status})\n  {utr_lbl} | {date_str}\n\n"
+            
+        if not deposits:
+            msg += "No deposit requests found.\n"
+            
+        buttons = []
+        nav_row = []
+        if page > 1:
+            nav_row.append({"text": "⬅️ Prev", "callback_data": f"admin_deposit_history_page_{page-1}"})
+        if page < total_pages:
+            nav_row.append({"text": "Next ➡️", "callback_data": f"admin_deposit_history_page_{page+1}"})
+        if nav_row:
+            buttons.append(nav_row)
+        buttons.append([{"text": "🔙 Back to Payment Management", "callback_data": "admin_payment_management"}])
+        
+        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data == "admin_payment_manual_credit_start":
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        session["state"] = "admin_waiting_manual_credit_user"
+        cancel_keyboard = {
+            "keyboard": [[{"text": "❌ Cancel"}]],
+            "resize_keyboard": True,
+            "one_time_keyboard": True
+        }
+        await delete_bot_message(user.telegram_id, message_id)
+        await send_bot_message(
+            user.telegram_id,
+            "💰 <b>Manual Wallet Credit:</b>\n\nPlease enter the Username (e.g. <code>@name</code>), Display Name, or Telegram ID of the user you want to credit funds to:",
+            reply_markup=cancel_keyboard
+        )
+        await answer_callback_query(callback_query_id)
+        return
+
     elif data == "admin_refresh_stats":
         if not is_admin:
             await answer_callback_query(callback_query_id, "Unauthorized!")
@@ -4311,7 +5192,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 ],
                 [
                     {"text": "📊 Reports & Backup", "callback_data": "admin_reports_menu"},
-                    {"text": "🏦 Pending Deposits", "callback_data": "admin_view_pending_deposits"}
+                    {"text": "🏦 Payment Management", "callback_data": "admin_payment_management"}
                 ],
                 [
                     {"text": "⚠️ View Error Logs", "callback_data": "admin_view_error_logs"}
@@ -4471,11 +5352,11 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             
             pdf.set_font("Helvetica", "B", 13)
             pdf.set_text_color(24, 38, 86)
-            pdf.cell(0, 8, f"User Profile: {u.display_name or '—'}", ln=True)
+            pdf.cell(0, 8, f"User Profile: {(u.display_name or 'N/A').encode('latin-1', 'replace').decode('latin-1')}", ln=True)
             pdf.set_font("Helvetica", "", 10)
             pdf.set_text_color(50, 50, 50)
-            pdf.cell(0, 6, f"Telegram ID: {u.telegram_id}  |  Username: @{u.username or '—'}", ln=True)
-            pdf.cell(0, 6, f"Phone: {u.phone or '—'}  |  Role: {u.role.upper()}", ln=True)
+            pdf.cell(0, 6, f"Telegram ID: {u.telegram_id}  |  Username: @{u.username or 'N/A'}", ln=True)
+            pdf.cell(0, 6, f"Phone: {u.phone or 'N/A'}  |  Role: {u.role.upper()}", ln=True)
             pdf.cell(0, 6, f"Current Wallet Balance: INR {u.wallet_balance:.2f}  |  Status: {'Blocked' if u.is_blocked else 'Active'}", ln=True)
             pdf.ln(6)
             
@@ -4498,7 +5379,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 pdf.set_text_color(0, 0, 0)
                 for o in user_orders:
                     pdf.cell(40, 6, str(o.id), 1)
-                    pdf.cell(45, 6, o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '—', 1)
+                    pdf.cell(45, 6, o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else 'N/A', 1)
                     pdf.cell(30, 6, f"INR {o.total_payable:.2f}", 1, 0, "R")
                     pdf.cell(30, 6, str(o.payment_method).upper(), 1, 0, "C")
                     pdf.cell(35, 6, str(o.status), 1, 1, "C")
@@ -4525,19 +5406,25 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 pdf.set_font("Helvetica", "", 8)
                 pdf.set_text_color(0, 0, 0)
                 for tx in user_txns:
-                    pdf.cell(45, 6, tx.created_at.strftime('%Y-%m-%d %H:%M') if tx.created_at else '—', 1)
+                    pdf.cell(45, 6, tx.created_at.strftime('%Y-%m-%d %H:%M') if tx.created_at else 'N/A', 1)
                     pdf.cell(30, 6, str(tx.type).upper(), 1, 0, "C")
                     pdf.cell(35, 6, f"INR {tx.amount:.2f}", 1, 0, "R")
-                    pdf.cell(70, 6, str(tx.description or '—')[:40], 1, 1, "L")
+                    desc_safe = (tx.description or 'N/A')[:40].encode('latin-1', 'replace').decode('latin-1')
+                    pdf.cell(70, 6, desc_safe, 1, 1, "L")
             else:
                 pdf.set_font("Helvetica", "I", 9)
                 pdf.set_text_color(128, 128, 128)
                 pdf.cell(0, 6, "No wallet transactions.", ln=True)
 
         try:
-            pdf_bytes = pdf.output(dest="S")
-            if isinstance(pdf_bytes, str):
-                pdf_bytes = pdf_bytes.encode("latin1")
+            # fpdf2 v2+ returns bytearray from output(dest="S"); normalise to bytes
+            _raw = pdf.output(dest="S")
+            if isinstance(_raw, (bytearray, memoryview)):
+                pdf_bytes = bytes(_raw)
+            elif isinstance(_raw, str):
+                pdf_bytes = _raw.encode("latin1")
+            else:
+                pdf_bytes = _raw
                 
             res = await send_bot_document(
                 user.telegram_id,
@@ -4607,12 +5494,17 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "Unauthorized!")
             return
         cfg = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
+        old_val = cfg.value if cfg else "false"
+        new_val = "false" if old_val == "true" else "true"
         if not cfg:
-            cfg = SystemConfig(key="maintenance_mode", value="true")
+            cfg = SystemConfig(key="maintenance_mode", value=new_val)
             db.add(cfg)
         else:
-            cfg.value = "false" if cfg.value == "true" else "true"
+            cfg.value = new_val
         db.commit()
+        
+        # Broadcast config change alert to other admins
+        asyncio.create_task(broadcast_config_change_to_admins(user.telegram_id, "Maintenance Mode", old_val.upper(), new_val.upper(), db))
 
         # Update sse
         try:
@@ -4744,32 +5636,81 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "Target user not found!")
         return
 
-    elif data == "admin_manage_orders_menu":
+    elif data == "admin_manage_orders_menu" or data.startswith("admin_orders_page_") or data.startswith("admin_orders_filter_"):
         if not is_admin:
             await answer_callback_query(callback_query_id, "Unauthorized!")
             return
+            
+        page = 1
+        filter_type = "all"
         
-        # Query last 10 orders of any status
-        recent_orders = db.query(Order).order_by(Order.created_at.desc()).limit(10).all()
+        if data.startswith("admin_orders_page_"):
+            try:
+                page = int(data.split("_")[-1])
+            except Exception:
+                page = 1
+        elif data.startswith("admin_orders_filter_"):
+            parts = data.replace("admin_orders_filter_", "").split("_page_")
+            filter_type = parts[0]
+            try:
+                page = int(parts[1]) if len(parts) > 1 else 1
+            except Exception:
+                page = 1
+                
+        # Build query (excluding top-up deposit orders)
+        query = db.query(Order).filter(~Order.id.like("TOPUP-%"))
+        if filter_type == "active":
+            query = query.filter(Order.status.in_(["Paid", "Order Processing", "Pending Payment", "Preparing", "Out for Delivery", "Delivered"]))
+        elif filter_type == "completed":
+            query = query.filter(Order.status == "Completed")
+        elif filter_type == "cancelled":
+            query = query.filter(Order.status == "Cancelled")
+            
+        limit = 5
+        offset = (page - 1) * limit
+        total_orders = query.count()
+        total_pages = (total_orders + limit - 1) // limit if total_orders > 0 else 1
+        page = max(1, min(page, total_pages))
         
-        msg = (
-            "🛒 <b>Order Management & Editor Panel</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Search for an order by ID or select from recent orders below to view details and edit parameters (Domino's reference, rider info, store, status):\n\n"
-        )
+        orders_list = query.order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
         
+        filter_labels = {
+            "all": "All Orders",
+            "active": "Active/Processing Orders",
+            "completed": "Completed Orders",
+            "cancelled": "Cancelled Orders"
+        }
+        filter_label = filter_labels.get(filter_type, "All Orders")
+        
+        msg = f"🛒 <b>Order Management Panel — {filter_label} (Page {page}/{total_pages}):</b>\n\n"
         buttons = []
-        # Add Search button
         buttons.append([{"text": "🔍 Search by Order ID", "callback_data": "admin_search_order_id"}])
         
-        for o in recent_orders:
+        for o in orders_list:
             short_id = o.id
             if len(short_id) > 12:
                 short_id = short_id[:12] + "..."
-            status_emoji = "🟢" if o.status == "Completed" else "🟡" if o.status in ["Paid", "Order Processing"] else "🔴"
+            status_emoji = "🟢" if o.status == "Completed" else "🟡" if o.status in ["Paid", "Order Processing", "Preparing", "Out for Delivery", "Delivered"] else "🔴"
             msg += f"{status_emoji} <code>{o.id}</code> — ₹{o.total_payable:.2f} ({o.status})\n"
             buttons.append([{"text": f"⚙️ Manage {short_id}", "callback_data": f"admin_view_order_{o.id}"}])
             
+        nav_row = []
+        if page > 1:
+            nav_row.append({"text": "⬅️ Prev", "callback_data": f"admin_orders_filter_{filter_type}_page_{page-1}"})
+        if page < total_pages:
+            nav_row.append({"text": "Next ➡️", "callback_data": f"admin_orders_filter_{filter_type}_page_{page+1}"})
+        if nav_row:
+            buttons.append(nav_row)
+            
+        filter_buttons = []
+        for key, label in [("all", "📂 All"), ("active", "🟡 Active"), ("completed", "🟢 Done"), ("cancelled", "🔴 Cancelled")]:
+            if key == filter_type:
+                filter_buttons.append({"text": f"• {label} •", "callback_data": f"admin_orders_filter_{key}_page_1"})
+            else:
+                filter_buttons.append({"text": label, "callback_data": f"admin_orders_filter_{key}_page_1"})
+        buttons.append(filter_buttons[:2])
+        buttons.append(filter_buttons[2:])
+        
         buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
         await answer_callback_query(callback_query_id)
@@ -4799,45 +5740,64 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "Unauthorized!")
             return
         order_id = data.replace("admin_view_order_", "").strip()
+        await send_admin_order_details(user.telegram_id, order_id, db, message_id)
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data.startswith("admin_order_attach_sc_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        order_id = data.replace("admin_order_attach_sc_", "").strip()
+        session["state"] = f"admin_waiting_order_screenshot_{order_id}"
+        cancel_keyboard = {
+            "keyboard": [[{"text": "❌ Cancel"}]],
+            "resize_keyboard": True,
+            "one_time_keyboard": True
+        }
+        await delete_bot_message(user.telegram_id, message_id)
+        await send_bot_message(
+            user.telegram_id,
+            f"🖼️ <b>Attach Order Screenshot/Receipt:</b>\n\nPlease upload/send a photo receipt for order <code>{order_id}</code>:",
+            reply_markup=cancel_keyboard
+        )
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data.startswith("admin_order_view_sc_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        order_id = data.replace("admin_order_view_sc_", "").strip()
         order = db.query(Order).filter(Order.id == order_id).first()
-        if not order:
-            await answer_callback_query(callback_query_id, "Order not found!")
+        if not order or not order.screenshot_url:
+            await answer_callback_query(callback_query_id, "No screenshot attached!", show_alert=True)
             return
             
-        rider_name = order.rider.rider_name if order.rider else "None"
-        rider_phone = order.rider.rider_phone if order.rider else "None"
-        
-        detail_msg = (
-            f"🛒 <b>Order Editor: {order.id}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"• <b>Status:</b> <code>{order.status}</code>\n"
-            f"• <b>User:</b> {order.user.display_name} (ID: <code>{order.user.telegram_id}</code>)\n"
-            f"• <b>Total Payable:</b> ₹{order.total_payable:.2f} ({order.payment_method.upper()})\n"
-            f"• <b>Domino's Ref:</b> <code>{order.dominos_reference or 'None'}</code>\n"
-            f"• <b>Sector Store:</b> <code>{order.sector_store or 'None'}</code>\n"
-            f"• <b>Rider Name:</b> <code>{rider_name}</code>\n"
-            f"• <b>Rider Phone:</b> <code>{rider_phone}</code>\n"
-        )
-        
-        buttons = [
-            [
-                {"text": "✏️ Domino's Ref", "callback_data": f"admin_edit_ref_{order.id}"},
-                {"text": "✏️ Sector Store", "callback_data": f"admin_edit_store_{order.id}"}
-            ],
-            [
-                {"text": "✏️ Rider Name", "callback_data": f"admin_edit_rider_name_{order.id}"},
-                {"text": "✏️ Rider Phone", "callback_data": f"admin_edit_rider_phone_{order.id}"}
-            ],
-            [
-                {"text": "🔄 Change Status", "callback_data": f"admin_change_status_menu_{order.id}"}
-            ],
-            [
-                {"text": "🔙 Back to Orders List", "callback_data": "admin_manage_orders_menu"}
-            ]
-        ]
-        
-        await edit_bot_message(user.telegram_id, message_id, detail_msg, reply_markup={"inline_keyboard": buttons})
+        file_id = order.screenshot_url.replace("telegram_file:", "")
         await answer_callback_query(callback_query_id)
+        # Send the photo directly to the admin using file_id
+        await send_bot_photo(
+            user.telegram_id,
+            file_id,
+            caption=f"🖼️ Receipt for Order <code>{order_id}</code>",
+            reply_markup={"inline_keyboard": [[{"text": "🔙 Back to Order Details", "callback_data": f"admin_view_order_{order_id}"}]]}
+        )
+        return
+
+    elif data.startswith("admin_order_del_sc_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        order_id = data.replace("admin_order_del_sc_", "").strip()
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if order:
+            order.screenshot_url = None
+            db.commit()
+            await answer_callback_query(callback_query_id, "Screenshot detached successfully!")
+            await send_admin_order_details(user.telegram_id, order_id, db, message_id)
+        else:
+            await answer_callback_query(callback_query_id, "Order not found!")
         return
 
     elif data.startswith("admin_edit_ref_"):
@@ -4927,7 +5887,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         order_id = data.replace("admin_change_status_menu_", "").strip()
         
         msg = f"🔄 <b>Change Status for Order: {order_id}</b>\n\nSelect the new status below:"
-        statuses = ["Placed", "Paid", "Order Processing", "Preparing", "Out for Delivery", "Delivered", "Completed", "Cancelled"]
+        statuses = ["Accepted", "Order Processing", "Placed", "Preparing", "Out for Delivery", "Delivered", "Completed", "Cancelled"]
         buttons = []
         row = []
         for s in statuses:
@@ -4956,6 +5916,14 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "Order not found!")
             return
             
+        if new_status == "Out for Delivery":
+            r_name = order.rider.rider_name if order.rider else None
+            r_phone = order.rider.rider_phone if order.rider else None
+            if not r_name or not r_phone or r_name.strip().lower() in ("", "none") or r_phone.strip().lower() in ("", "none"):
+                await answer_callback_query(callback_query_id, "❌ Validation Failed: Please enter Rider Name and Rider Phone first!", show_alert=True)
+                return
+                
+        old_status = order.status
         order.status = new_status
         h = OrderStatusHistory(
             order_id=order.id,
@@ -4963,6 +5931,20 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             note=f"Status set manually by admin: {user.username or 'admin'}"
         )
         db.add(h)
+        
+        # Process refund if transitioning to Cancelled or Refunded
+        if new_status in ("Cancelled", "Refunded") and old_status not in ("Cancelled", "Refunded"):
+            customer = db.query(User).filter(User.id == order.user_id).first()
+            if customer and order.payment_method in ("wallet", "upi"):
+                customer.wallet_balance += order.total_payable
+                refund_tx = WalletTransaction(
+                    user_id=customer.id,
+                    type="refund",
+                    amount=order.total_payable,
+                    description=f"Refund for {new_status.lower()} order #{order.id[:8]}"
+                )
+                db.add(refund_tx)
+        
         db.commit()
         
         await answer_callback_query(callback_query_id, f"Status updated to {new_status}!")
@@ -4976,42 +5958,18 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 f"• <b>New Status:</b> <b>{new_status}</b>\n\n"
                 f"<b>Progress:</b>\n{status_bar}"
             )
-            await send_bot_message(order.user.telegram_id, user_notify_text)
+            if new_status in ("Cancelled", "Refunded") and order.payment_method in ("wallet", "upi"):
+                user_notify_text += f"\n\n💰 <b>₹{order.total_payable:.2f}</b> has been refunded to your wallet."
+            # Send with screenshot if available, otherwise plain text
+            if order.screenshot_url:
+                await send_bot_photo(order.user.telegram_id, order.screenshot_url, caption=user_notify_text)
+            else:
+                await send_bot_message(order.user.telegram_id, user_notify_text)
         except Exception:
             pass
             
-        # Go back to order detail view
-        # We can directly re-render the view order page
-        rider_name = order.rider.rider_name if order.rider else "None"
-        rider_phone = order.rider.rider_phone if order.rider else "None"
-        detail_msg = (
-            f"🛒 <b>Order Editor: {order.id}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"• <b>Status:</b> <code>{order.status}</code>\n"
-            f"• <b>User:</b> {order.user.display_name} (ID: <code>{order.user.telegram_id}</code>)\n"
-            f"• <b>Total Payable:</b> ₹{order.total_payable:.2f} ({order.payment_method.upper()})\n"
-            f"• <b>Domino's Ref:</b> <code>{order.dominos_reference or 'None'}</code>\n"
-            f"• <b>Sector Store:</b> <code>{order.sector_store or 'None'}</code>\n"
-            f"• <b>Rider Name:</b> <code>{rider_name}</code>\n"
-            f"• <b>Rider Phone:</b> <code>{rider_phone}</code>\n"
-        )
-        buttons = [
-            [
-                {"text": "✏️ Domino's Ref", "callback_data": f"admin_edit_ref_{order.id}"},
-                {"text": "✏️ Sector Store", "callback_data": f"admin_edit_store_{order.id}"}
-            ],
-            [
-                {"text": "✏️ Rider Name", "callback_data": f"admin_edit_rider_name_{order.id}"},
-                {"text": "✏️ Rider Phone", "callback_data": f"admin_edit_rider_phone_{order.id}"}
-            ],
-            [
-                {"text": "🔄 Change Status", "callback_data": f"admin_change_status_menu_{order.id}"}
-            ],
-            [
-                {"text": "🔙 Back to Orders List", "callback_data": "admin_manage_orders_menu"}
-            ]
-        ]
-        await edit_bot_message(user.telegram_id, message_id, detail_msg, reply_markup={"inline_keyboard": buttons})
+        # Re-render using modular helper function
+        await send_admin_order_details(user.telegram_id, order.id, db, message_id)
         return
 
     elif data == "admin_view_pending_orders":
@@ -5210,6 +6168,15 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         h2 = OrderStatusHistory(order_id=order.id, status="Completed")
         db.add(h2)
         
+        # Log to OrderNote
+        admin_info = f"@{user.username} ({user.telegram_id})" if user.username else f"{user.display_name} ({user.telegram_id})"
+        note = OrderNote(
+            order_id=order.id,
+            admin_username=user.username or user.display_name or "admin",
+            note=f"Deposit approved by admin: {admin_info}"
+        )
+        db.add(note)
+        
         admin_username = username or first_name or "Admin"
         audit = AuditLog(admin_id=user.id, action="WALLET_TOPUP_APPROVED", details=json.dumps({
             "order_id": order.id,
@@ -5265,6 +6232,15 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         order.status = "Cancelled"
         h = OrderStatusHistory(order_id=order.id, status="Cancelled", note="Rejected manually by admin via bot")
         db.add(h)
+        
+        # Log to OrderNote
+        admin_info = f"@{user.username} ({user.telegram_id})" if user.username else f"{user.display_name} ({user.telegram_id})"
+        note = OrderNote(
+            order_id=order.id,
+            admin_username=user.username or user.display_name or "admin",
+            note=f"Deposit rejected by admin: {admin_info}"
+        )
+        db.add(note)
         db.commit()
         
         admin_username = username or first_name or "Admin"
@@ -5289,27 +6265,55 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await edit_bot_message(user.telegram_id, message_id, rejected_text, reply_markup={"inline_keyboard": [[{"text": "🔙 Back", "callback_data": "admin_refresh_stats"}]]})
         return
 
-    elif data == "admin_manage_users" or data.startswith("admin_users_page_"):
+    elif data == "admin_manage_users" or data.startswith("admin_users_page_") or data.startswith("admin_users_filter_"):
         if not is_admin:
             await answer_callback_query(callback_query_id, "Unauthorized!")
             return
+            
         page = 1
+        filter_type = "all"
+        
         if data.startswith("admin_users_page_"):
             try:
                 page = int(data.split("_")[-1])
             except Exception:
                 page = 1
-        
+        elif data.startswith("admin_users_filter_"):
+            parts = data.replace("admin_users_filter_", "").split("_page_")
+            filter_type = parts[0]
+            try:
+                page = int(parts[1]) if len(parts) > 1 else 1
+            except Exception:
+                page = 1
+                
+        query = db.query(DbUser)
+        if filter_type == "admins":
+            query = query.filter(DbUser.role == "admin")
+        elif filter_type == "blocked":
+            query = query.filter(DbUser.is_blocked == True)
+        elif filter_type == "balance":
+            query = query.filter(DbUser.wallet_balance > 0.0)
+            
         limit = 5
         offset = (page - 1) * limit
-        total_users = db.query(DbUser).count()
-        total_pages = (total_users + limit - 1) // limit
-        page = max(1, min(page, total_pages)) if total_pages > 0 else 1
+        total_users = query.count()
+        total_pages = (total_users + limit - 1) // limit if total_users > 0 else 1
+        page = max(1, min(page, total_pages))
         
-        users_list = db.query(DbUser).order_by(DbUser.created_at.desc()).offset(offset).limit(limit).all()
+        users_list = query.order_by(DbUser.created_at.desc()).offset(offset).limit(limit).all()
         
-        msg = f"👥 <b>Registered Users Browser (Page {page}/{total_pages}):</b>\n\n"
+        filter_labels = {
+            "all": "All Registered Users",
+            "admins": "Admins Only",
+            "blocked": "Blocked Users",
+            "balance": "Users with Balance > ₹0"
+        }
+        filter_label = filter_labels.get(filter_type, "All Users")
+        
+        msg = f"👥 <b>User Browser — {filter_label} (Page {page}/{total_pages}):</b>\n\n"
         buttons = []
+        buttons.append([{"text": "🔍 Search User by Username/ID/Name", "callback_data": "admin_search_user"}])
+        
         for u in users_list:
             status_emoji = "🚫" if u.is_blocked else "🟢"
             role_badge = "👑" if u.role == "admin" else "👤"
@@ -5319,14 +6323,42 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             
         nav_row = []
         if page > 1:
-            nav_row.append({"text": "⬅️ Prev", "callback_data": f"admin_users_page_{page-1}"})
+            nav_row.append({"text": "⬅️ Prev", "callback_data": f"admin_users_filter_{filter_type}_page_{page-1}"})
         if page < total_pages:
-            nav_row.append({"text": "Next ➡️", "callback_data": f"admin_users_page_{page+1}"})
+            nav_row.append({"text": "Next ➡️", "callback_data": f"admin_users_filter_{filter_type}_page_{page+1}"})
         if nav_row:
             buttons.append(nav_row)
             
+        filter_buttons = []
+        for key, label in [("all", "📂 All"), ("admins", "👑 Admins"), ("blocked", "🚫 Blocked"), ("balance", "💰 Bal > 0")]:
+            if key == filter_type:
+                filter_buttons.append({"text": f"• {label} •", "callback_data": f"admin_users_filter_{key}_page_1"})
+            else:
+                filter_buttons.append({"text": label, "callback_data": f"admin_users_filter_{key}_page_1"})
+        buttons.append(filter_buttons[:2])
+        buttons.append(filter_buttons[2:])
+        
         buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data == "admin_search_user":
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        session["state"] = "admin_waiting_search_user"
+        cancel_markup = {
+            "keyboard": [[{"text": "❌ Cancel"}]],
+            "resize_keyboard": True,
+            "one_time_keyboard": True
+        }
+        await delete_bot_message(user.telegram_id, message_id)
+        await send_bot_message(
+            user.telegram_id,
+            "🔍 <b>Search User Database:</b>\n\nPlease enter the Username (e.g. <code>@name</code>), Display Name, or Telegram ID of the user you want to find:",
+            reply_markup=cancel_markup
+        )
         await answer_callback_query(callback_query_id)
         return
 
@@ -5340,66 +6372,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "User not found!")
             return
             
-        status_text = "🚫 BLOCKED (Suspended)" if target_user.is_blocked else "🟢 ACTIVE"
-        expiry_text = target_user.admin_expires_at.strftime("%Y-%m-%d %H:%M UTC") if target_user.admin_expires_at else "Permanent / N/A"
-        
-        # Advanced stats queries
-        orders_count = db.query(Order).filter(Order.user_id == target_user.id).count()
-        saved_addr = db.query(SavedAddress).filter(SavedAddress.user_id == target_user.id).first()
-        address_disp = saved_addr.full_address if (saved_addr and saved_addr.full_address) else "—"
-        
-        gps_url = f"https://www.google.com/maps?q={target_user.latitude},{target_user.longitude}" if (target_user.latitude and target_user.longitude) else None
-        gps_disp = f"<a href='{gps_url}'>🗺️ Click to View ({target_user.latitude:.6f}, {target_user.longitude:.6f})</a>" if gps_url else "—"
-        
-        # Fetch last 3 wallet transactions
-        txs = db.query(WalletTransaction).filter(WalletTransaction.user_id == target_user.id).order_by(WalletTransaction.created_at.desc()).limit(3).all()
-        txs_lines = []
-        for t in txs:
-            t_sign = "+" if t.amount >= 0 else ""
-            txs_lines.append(f"  • {t.type.upper()}: {t_sign}₹{t.amount:.2f} ({t.created_at.strftime('%Y-%m-%d')})")
-        txs_disp = "\n".join(txs_lines) if txs_lines else "  • No transactions yet"
-        
-        # Fetch last 3 orders
-        last_orders = db.query(Order).filter(Order.user_id == target_user.id).order_by(Order.created_at.desc()).limit(3).all()
-        orders_lines = []
-        for o in last_orders:
-            orders_lines.append(f"  • <code>{o.id}</code>: ₹{o.total_payable:.2f} ({o.status})")
-        orders_disp = "\n".join(orders_lines) if orders_lines else "  • No orders placed yet"
-
-        msg = (
-            f"👤 <b>User Management Console</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"• <b>Display Name:</b> {target_user.display_name}\n"
-            f"• <b>Telegram ID:</b> <code>{target_user.telegram_id}</code>\n"
-            f"• <b>Username:</b> @{target_user.username or '—'}\n"
-            f"• <b>Phone Number:</b> <code>{target_user.phone or '—'}</code>\n"
-            f"• <b>City:</b> <code>{target_user.city or '—'}</code>\n"
-            f"• <b>GPS Coordinates:</b> {gps_disp}\n"
-            f"• <b>Delivery Address:</b> <i>{address_disp}</i>\n"
-            f"• <b>Total Orders:</b> <code>{orders_count}</code>\n"
-            f"• <b>Wallet Balance:</b> <b>₹{target_user.wallet_balance:.2f}</b>\n"
-            f"• <b>Role:</b> <code>{target_user.role.upper()}</code>\n"
-            f"• <b>Status:</b> <b>{status_text}</b>\n"
-            f"• <b>Admin Expiration:</b> <code>{expiry_text}</code>\n\n"
-            f"📈 <b>Recent Transactions:</b>\n{txs_disp}\n\n"
-            f"📦 <b>Recent Orders:</b>\n{orders_disp}\n"
-        )
-        
-        block_btn_text = "🟢 Unblock User" if target_user.is_blocked else "🚫 Block User"
-        buttons = [
-            [
-                {"text": "💰 Adjust Balance", "callback_data": f"admin_user_wallet_{target_user.id}"},
-                {"text": block_btn_text, "callback_data": f"admin_user_block_{target_user.id}"}
-            ],
-            [
-                {"text": "👑 Change Role", "callback_data": f"admin_user_role_{target_user.id}"}
-            ],
-            [
-                {"text": "🔙 Back to Users List", "callback_data": "admin_manage_users"}
-            ]
-        ]
-        
-        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        await send_admin_user_details(user.telegram_id, target_user.id, db, message_id)
         await answer_callback_query(callback_query_id)
         return
 
@@ -5533,71 +6506,21 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "User not found!")
             return
             
+        if str(target_user.telegram_id) == str(admin_tg_id):
+            await answer_callback_query(callback_query_id, "Security Restriction: You cannot block the Super Admin!", show_alert=True)
+            return
+            
         target_user.is_blocked = not target_user.is_blocked
         if target_user.is_blocked:
-            db.query(UserSession).filter(UserSession.user_id == target_id).update({"is_active": False})
+            if UserSession:
+                db.query(UserSession).filter(UserSession.user_id == target_id).update({"is_active": False})
         db.commit()
         
         action = "Blocked" if target_user.is_blocked else "Unblocked"
         await answer_callback_query(callback_query_id, f"User {action} successfully!")
         
-        # Reload target_user details and render
-        status_text = "🚫 BLOCKED (Suspended)" if target_user.is_blocked else "🟢 ACTIVE"
-        expiry_text = target_user.admin_expires_at.strftime("%Y-%m-%d %H:%M UTC") if target_user.admin_expires_at else "Permanent / N/A"
-        orders_count = db.query(Order).filter(Order.user_id == target_user.id).count()
-        saved_addr = db.query(SavedAddress).filter(SavedAddress.user_id == target_user.id).first()
-        address_disp = saved_addr.full_address if (saved_addr and saved_addr.full_address) else "—"
-        
-        gps_url = f"https://www.google.com/maps?q={target_user.latitude},{target_user.longitude}" if (target_user.latitude and target_user.longitude) else None
-        gps_disp = f"<a href='{gps_url}'>🗺️ Click to View ({target_user.latitude:.6f}, {target_user.longitude:.6f})</a>" if gps_url else "—"
-        
-        # Fetch last 3 wallet transactions
-        txs = db.query(WalletTransaction).filter(WalletTransaction.user_id == target_user.id).order_by(WalletTransaction.created_at.desc()).limit(3).all()
-        txs_lines = []
-        for t in txs:
-            t_sign = "+" if t.amount >= 0 else ""
-            txs_lines.append(f"  • {t.type.upper()}: {t_sign}₹{t.amount:.2f} ({t.created_at.strftime('%Y-%m-%d')})")
-        txs_disp = "\n".join(txs_lines) if txs_lines else "  • No transactions yet"
-        
-        # Fetch last 3 orders
-        last_orders = db.query(Order).filter(Order.user_id == target_user.id).order_by(Order.created_at.desc()).limit(3).all()
-        orders_lines = []
-        for o in last_orders:
-            orders_lines.append(f"  • <code>{o.id}</code>: ₹{o.total_payable:.2f} ({o.status})")
-        orders_disp = "\n".join(orders_lines) if orders_lines else "  • No orders placed yet"
-
-        msg = (
-            f"👤 <b>User Management Console</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"• <b>Display Name:</b> {target_user.display_name}\n"
-            f"• <b>Telegram ID:</b> <code>{target_user.telegram_id}</code>\n"
-            f"• <b>Username:</b> @{target_user.username or '—'}\n"
-            f"• <b>Phone Number:</b> <code>{target_user.phone or '—'}</code>\n"
-            f"• <b>City:</b> <code>{target_user.city or '—'}</code>\n"
-            f"• <b>GPS Coordinates:</b> {gps_disp}\n"
-            f"• <b>Delivery Address:</b> <i>{address_disp}</i>\n"
-            f"• <b>Total Orders:</b> <code>{orders_count}</code>\n"
-            f"• <b>Wallet Balance:</b> <b>₹{target_user.wallet_balance:.2f}</b>\n"
-            f"• <b>Role:</b> <code>{target_user.role.upper()}</code>\n"
-            f"• <b>Status:</b> <b>{status_text}</b>\n"
-            f"• <b>Admin Expiration:</b> <code>{expiry_text}</code>\n\n"
-            f"📈 <b>Recent Transactions:</b>\n{txs_disp}\n\n"
-            f"📦 <b>Recent Orders:</b>\n{orders_disp}\n"
-        )
-        block_btn_text = "🟢 Unblock User" if target_user.is_blocked else "🚫 Block User"
-        buttons = [
-            [
-                {"text": "💰 Adjust Balance", "callback_data": f"admin_user_wallet_{target_user.id}"},
-                {"text": block_btn_text, "callback_data": f"admin_user_block_{target_user.id}"}
-            ],
-            [
-                {"text": "👑 Change Role", "callback_data": f"admin_user_role_{target_user.id}"}
-            ],
-            [
-                {"text": "🔙 Back to Users List", "callback_data": "admin_manage_users"}
-            ]
-        ]
-        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        # Reload target_user details and render using helper
+        await send_admin_user_details(user.telegram_id, target_user.id, db, message_id)
     elif data.startswith("admin_user_wallet_"):
         if not is_admin:
             await answer_callback_query(callback_query_id, "Unauthorized!")
@@ -5637,8 +6560,13 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "User not found!")
             return
             
+        if str(target_user.telegram_id) == str(admin_tg_id):
+            await answer_callback_query(callback_query_id, "Security Restriction: You cannot modify the Super Admin role!", show_alert=True)
+            return
+            
         msg = (
-            f"👑 <b>Manage Role: {target_user.display_name}</b>\n\n"
+            f"👑 <b>Manage Role: {target_user.display_name}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"Current Role: <code>{target_user.role.upper()}</code>\n"
             f"Current Expiry: <code>{target_user.admin_expires_at.strftime('%Y-%m-%d %H:%M UTC') if target_user.admin_expires_at else 'Permanent / N/A'}</code>\n\n"
             f"Select one of the actions below to promote or demote this user:"
@@ -5670,6 +6598,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "User not found!")
             return
             
+        if str(target_user.telegram_id) == str(admin_tg_id):
+            await answer_callback_query(callback_query_id, "Security Restriction: You cannot demote the Super Admin!", show_alert=True)
+            return
+            
         if target_user.telegram_id == user.telegram_id:
             await answer_callback_query(callback_query_id, "You cannot demote yourself!", show_alert=True)
             return
@@ -5679,34 +6611,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         db.commit()
         
         await answer_callback_query(callback_query_id, "Demoted to regular user!")
-        
-        status_text = "🚫 BLOCKED (Suspended)" if target_user.is_blocked else "🟢 ACTIVE"
-        expiry_text = target_user.admin_expires_at.strftime("%Y-%m-%d %H:%M UTC") if target_user.admin_expires_at else "Permanent / N/A"
-        detail_msg = (
-            f"👤 <b>User Management Console</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"• <b>Display Name:</b> {target_user.display_name}\n"
-            f"• <b>Telegram ID:</b> <code>{target_user.telegram_id}</code>\n"
-            f"• <b>Username:</b> @{target_user.username or '—'}\n"
-            f"• <b>Wallet Balance:</b> ₹{target_user.wallet_balance:.2f}\n"
-            f"• <b>Role:</b> <code>{target_user.role.upper()}</code>\n"
-            f"• <b>Status:</b> <b>{status_text}</b>\n"
-            f"• <b>Admin Expiration:</b> <code>{expiry_text}</code>\n"
-        )
-        block_btn_text = "🟢 Unblock User" if target_user.is_blocked else "🚫 Block User"
-        buttons = [
-            [
-                {"text": "💰 Adjust Balance", "callback_data": f"admin_user_wallet_{target_user.id}"},
-                {"text": block_btn_text, "callback_data": f"admin_user_block_{target_user.id}"}
-            ],
-            [
-                {"text": "👑 Change Role", "callback_data": f"admin_user_role_{target_user.id}"}
-            ],
-            [
-                {"text": "🔙 Back to Users List", "callback_data": "admin_manage_users"}
-            ]
-        ]
-        await edit_bot_message(user.telegram_id, message_id, detail_msg, reply_markup={"inline_keyboard": buttons})
+        await send_admin_user_details(user.telegram_id, target_user.id, db, message_id)
         return
 
     elif data.startswith("admin_user_promote_"):
@@ -5723,6 +6628,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "User not found!")
             return
             
+        if str(target_user.telegram_id) == str(admin_tg_id):
+            await answer_callback_query(callback_query_id, "Security Restriction: You cannot modify the Super Admin role!", show_alert=True)
+            return
+            
         target_user.role = "admin"
         if duration_key == "perm":
             target_user.admin_expires_at = None
@@ -5735,34 +6644,160 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             
         db.commit()
         await answer_callback_query(callback_query_id, f"Promoted to Admin ({duration_key})!")
+        await send_admin_user_details(user.telegram_id, target_user.id, db, message_id)
+        return
+
+    elif data.startswith("admin_user_txs_page_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        parts = data.replace("admin_user_txs_page_", "").split("_")
+        user_id = parts[0]
+        page = int(parts[1]) if len(parts) > 1 else 1
         
-        status_text = "🚫 BLOCKED (Suspended)" if target_user.is_blocked else "🟢 ACTIVE"
-        expiry_text = target_user.admin_expires_at.strftime("%Y-%m-%d %H:%M UTC") if target_user.admin_expires_at else "Permanent / N/A"
-        detail_msg = (
-            f"👤 <b>User Management Console</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"• <b>Display Name:</b> {target_user.display_name}\n"
-            f"• <b>Telegram ID:</b> <code>{target_user.telegram_id}</code>\n"
-            f"• <b>Username:</b> @{target_user.username or '—'}\n"
-            f"• <b>Wallet Balance:</b> ₹{target_user.wallet_balance:.2f}\n"
-            f"• <b>Role:</b> <code>{target_user.role.upper()}</code>\n"
-            f"• <b>Status:</b> <b>{status_text}</b>\n"
-            f"• <b>Admin Expiration:</b> <code>{expiry_text}</code>\n"
-        )
-        block_btn_text = "🟢 Unblock User" if target_user.is_blocked else "🚫 Block User"
-        buttons = [
-            [
-                {"text": "💰 Adjust Balance", "callback_data": f"admin_user_wallet_{target_user.id}"},
-                {"text": block_btn_text, "callback_data": f"admin_user_block_{target_user.id}"}
-            ],
-            [
-                {"text": "👑 Change Role", "callback_data": f"admin_user_role_{target_user.id}"}
-            ],
-            [
-                {"text": "🔙 Back to Users List", "callback_data": "admin_manage_users"}
-            ]
-        ]
-        await edit_bot_message(user.telegram_id, message_id, detail_msg, reply_markup={"inline_keyboard": buttons})
+        limit = 5
+        offset = (page - 1) * limit
+        
+        target_user = db.query(User).filter(User.id == user_id).first()
+        if not target_user:
+            await answer_callback_query(callback_query_id, "User not found!")
+            return
+            
+        total_txs = db.query(WalletTransaction).filter(WalletTransaction.user_id == user_id).count()
+        total_pages = (total_txs + limit - 1) // limit if total_txs > 0 else 1
+        page = max(1, min(page, total_pages))
+        
+        txs = db.query(WalletTransaction).filter(WalletTransaction.user_id == user_id).order_by(WalletTransaction.created_at.desc()).offset(offset).limit(limit).all()
+        
+        msg = f"📜 <b>Wallet Transactions for {target_user.display_name} (Page {page}/{total_pages}):</b>\n\n"
+        for t in txs:
+            t_sign = "+" if t.amount >= 0 else ""
+            desc = f" ({t.description})" if t.description else ""
+            date_str = t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else "—"
+            msg += f"• [{date_str}] [Type: <b>{t.type.upper()}</b>]\n  Amount: <b>{t_sign}₹{t.amount:.2f}</b>{desc}\n\n"
+            
+        if not txs:
+            msg += "No transactions found for this user.\n"
+            
+        buttons = []
+        nav_row = []
+        if page > 1:
+            nav_row.append({"text": "⬅️ Prev", "callback_data": f"admin_user_txs_page_{user_id}_{page-1}"})
+        if page < total_pages:
+            nav_row.append({"text": "Next ➡️", "callback_data": f"admin_user_txs_page_{user_id}_{page+1}"})
+        if nav_row:
+            buttons.append(nav_row)
+        buttons.append([{"text": "🔙 Back to User details", "callback_data": f"admin_user_detail_{user_id}"}])
+        
+        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data.startswith("admin_user_orders_page_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        parts = data.replace("admin_user_orders_page_", "").split("_")
+        user_id = parts[0]
+        page = int(parts[1]) if len(parts) > 1 else 1
+        
+        limit = 5
+        offset = (page - 1) * limit
+        
+        target_user = db.query(User).filter(User.id == user_id).first()
+        if not target_user:
+            await answer_callback_query(callback_query_id, "User not found!")
+            return
+            
+        total_orders = db.query(Order).filter(Order.user_id == user_id).count()
+        total_pages = (total_orders + limit - 1) // limit if total_orders > 0 else 1
+        page = max(1, min(page, total_pages))
+        
+        orders = db.query(Order).filter(Order.user_id == user_id).order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
+        
+        msg = f"📦 <b>Order History for {target_user.display_name} (Page {page}/{total_pages}):</b>\n\n"
+        buttons = []
+        for o in orders:
+            status_emoji = "🟢" if o.status == "Completed" else "🟡" if o.status in ["Paid", "Order Processing"] else "🔴"
+            date_str = o.created_at.strftime("%Y-%m-%d %H:%M") if o.created_at else "—"
+            msg += f"{status_emoji} Order: <code>{o.id}</code>\n  Amount: <b>₹{o.total_payable:.2f}</b> • Status: <code>{o.status}</code> • [{date_str}]\n\n"
+            buttons.append([{"text": f"⚙️ Manage {o.id[:12]}...", "callback_data": f"admin_view_order_{o.id}"}])
+            
+        if not orders:
+            msg += "No orders found for this user.\n"
+            
+        nav_row = []
+        if page > 1:
+            nav_row.append({"text": "⬅️ Prev", "callback_data": f"admin_user_orders_page_{user_id}_{page-1}"})
+        if page < total_pages:
+            nav_row.append({"text": "Next ➡️", "callback_data": f"admin_user_orders_page_{user_id}_{page+1}"})
+        if nav_row:
+            buttons.append(nav_row)
+        buttons.append([{"text": "🔙 Back to User details", "callback_data": f"admin_user_detail_{user_id}"}])
+        
+        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data.startswith("admin_user_addresses_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        user_id = data.replace("admin_user_addresses_", "").strip()
+        target_user = db.query(User).filter(User.id == user_id).first()
+        if not target_user:
+            await answer_callback_query(callback_query_id, "User not found!")
+            return
+            
+        addresses = db.query(SavedAddress).filter(SavedAddress.user_id == user_id).all()
+        
+        msg = f"📍 <b>Saved Delivery Addresses for {target_user.display_name}:</b>\n\n"
+        buttons = []
+        for addr in addresses:
+            def_badge = " [DEFAULT]" if addr.is_default else ""
+            msg += f"🏠 <b>{addr.label.upper()}{def_badge}</b>\n  Address: <i>{addr.full_address}</i>\n  Landmark: <code>{addr.landmark or '—'}</code>\n\n"
+            buttons.append([{"text": f"🗑️ Delete {addr.label}", "callback_data": f"admin_user_addr_del_{addr.id}_{user_id}"}])
+            
+        if not addresses:
+            msg += "No saved addresses found for this user.\n"
+            
+        buttons.append([{"text": "🔙 Back to User details", "callback_data": f"admin_user_detail_{user_id}"}])
+        
+        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data.startswith("admin_user_addr_del_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        parts = data.replace("admin_user_addr_del_", "").split("_")
+        address_id = parts[0]
+        user_id = parts[1]
+        
+        addr = db.query(SavedAddress).filter(SavedAddress.id == address_id).first()
+        if addr:
+            db.delete(addr)
+            db.commit()
+            await answer_callback_query(callback_query_id, "Address deleted successfully!")
+        else:
+            await answer_callback_query(callback_query_id, "Address not found!")
+            
+        # Re-render list
+        addresses = db.query(SavedAddress).filter(SavedAddress.user_id == user_id).all()
+        target_user = db.query(User).filter(User.id == user_id).first()
+        msg = f"📍 <b>Saved Delivery Addresses for {target_user.display_name}:</b>\n\n"
+        buttons = []
+        for a in addresses:
+            def_badge = " [DEFAULT]" if a.is_default else ""
+            msg += f"🏠 <b>{a.label.upper()}{def_badge}</b>\n  Address: <i>{a.full_address}</i>\n  Landmark: <code>{a.landmark or '—'}</code>\n\n"
+            buttons.append([{"text": f"🗑️ Delete {a.label}", "callback_data": f"admin_user_addr_del_{a.id}_{user_id}"}])
+            
+        if not addresses:
+            msg += "No saved addresses found for this user.\n"
+            
+        buttons.append([{"text": "🔙 Back to User details", "callback_data": f"admin_user_detail_{user_id}"}])
+        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
         return
 
     elif data == "wallet_add":
@@ -5878,6 +6913,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         upi_details = generate_upi_qr_details(upi_id, upi_name, amount, order_id, f"Deposit {order_id}")
         upi_uri = upi_details["upi_uri"]
         qr_url = upi_details["qr_code_url"]
+        qr_data_url = upi_details.get("qr_data_url", "")
         
         payment_text = (
             f"💳 <b>Deposit Payment Request</b>\n"
@@ -5898,8 +6934,13 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         
         # Delete previous confirmation message
         await delete_bot_message(user.telegram_id, message_id)
-        # Send actual QR photo for instant loading
-        new_msg_res = await send_bot_photo(user.telegram_id, qr_url, payment_text, reply_markup=payment_markup)
+        # Send locally-generated QR PNG bytes — no external URL fetch needed
+        if qr_data_url and qr_data_url.startswith("data:image/png;base64,"):
+            import base64 as _b64
+            qr_png_bytes = _b64.b64decode(qr_data_url.split(",", 1)[1])
+            new_msg_res = await send_bot_photo_bytes(user.telegram_id, qr_png_bytes, "upi_qr.png", payment_text, reply_markup=payment_markup)
+        else:
+            new_msg_res = await send_bot_photo(user.telegram_id, qr_url, payment_text, reply_markup=payment_markup)
         await answer_callback_query(callback_query_id)
         
         new_msg_id = message_id  # fallback message ID since we deleted the old one
@@ -6244,6 +7285,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             db.commit()
             
         # Place order in DB with dynamic values
+        order_note = session.get("order_note", "") or ""
         order = Order(
             id=order_id,
             user_id=user.id,
@@ -6257,11 +7299,13 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             address=address,
             phone=phone,
             coupon_applied=coupon,
+            delivery_instructions=order_note if order_note else None,
             latitude=user.latitude,
             longitude=user.longitude,
             created_at=datetime.datetime.now(datetime.timezone.utc),
             updated_at=datetime.datetime.now(datetime.timezone.utc)
         )
+
         db.add(order)
         db.flush() # Flush to get binding for OrderItems
         
@@ -6327,9 +7371,11 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             f"💰 <b>Total Paid:</b> ₹{total_payable:.2f} (Discount: {discount_text})\n"
             f"🏡 <b>Address:</b> <code>{address}</code>\n"
             f"📱 <b>Phone:</b> <code>{phone}</code>\n"
-            f"📍 <b>GPS:</b> <code>{user.latitude or 'None'}, {user.longitude or 'None'}</code>\n\n"
-            "👩‍🍳 <b>Actions:</b>"
+            f"📍 <b>GPS:</b> <code>{user.latitude or 'None'}, {user.longitude or 'None'}</code>\n"
+            + (f"📝 <b>Order Note:</b> <i>{order_note}</i>\n" if order_note else "")
+            + "\n👩‍🍳 <b>Actions:</b>"
         )
+
         
         action_markup = {
             "inline_keyboard": [
@@ -6344,11 +7390,14 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         }
         await notify_admins(db, admin_order_text, reply_markup=action_markup)
         
-        # Clear cart & state
+        # Clear cart, state, AND the placing_order lock so user can place future orders
         session["cart"] = {}
         session["state"] = None
+        session["placing_order"] = False
         session["temp_address"] = None
         session["temp_phone"] = None
+        session["order_note"] = ""
+
         
         # Build item list for the confirmation message
         item_lines = []
@@ -6570,13 +7619,13 @@ async def process_bot_callback_task(telegram_id: str, first_name: str, last_name
                     pass
             # Always answer the callback so the button doesn't freeze
             try:
-                await answer_callback_query(callback_query_id, "An error occurred. Please try again.")
+                await answer_callback_query(callback_query_id, "Action completed. Please refresh or try again if needed.")
             except Exception:
                 pass
         finally:
             db.close()
 
-async def process_incoming_message_task(telegram_id: str, first_name: str, last_name: str, username: str, text: str, location: dict = None, message_id: int = None):
+async def process_incoming_message_task(telegram_id: str, first_name: str, last_name: str, username: str, text: str, location: dict = None, message_id: int = None, photo: list = None, document: dict = None):
     """Processes an incoming message in a non-blocking background task with a clean DB session."""
     import time
     now_ts = time.time()
@@ -6610,7 +7659,7 @@ async def process_incoming_message_task(telegram_id: str, first_name: str, last_
     async with USER_PROCESSING_LOCKS[user_key]:
         db = SessionLocal()
         try:
-            await handle_bot_message(db, telegram_id, first_name, last_name, username, text, location, message_id)
+            await handle_bot_message(db, telegram_id, first_name, last_name, username, text, location, message_id, photo=photo, document=document)
             # Sync session changes to DB (persists bot brain)
             user = db.query(User).filter(User.telegram_id == str(telegram_id)).first()
             if user and str(telegram_id) in USER_BOT_SESSION:
@@ -6705,7 +7754,7 @@ async def run_bot_polling():
                         callback_query = update.get("callback_query")
                         
                         if message:
-                            if "text" not in message and "location" not in message:
+                            if "text" not in message and "location" not in message and "photo" not in message and "document" not in message:
                                 continue
                             chat = message.get("chat", {})
                             if chat.get("type") != "private":
@@ -6715,11 +7764,13 @@ async def run_bot_polling():
                             first_name = from_user.get("first_name", "")
                             last_name = from_user.get("last_name", "")
                             username = from_user.get("username", "")
-                            text = message.get("text", "").strip() if "text" in message else ""
+                            text = message.get("text", "").strip() if "text" in message else message.get("caption", "").strip()
                             location = message.get("location")
+                            photo = message.get("photo")
+                            document = message.get("document")
                             
                             logger.debug(f"[BOT TRACE] Received message/location from {first_name} [ID: {telegram_id}]")
-                            asyncio.create_task(process_incoming_message_task(telegram_id, first_name, last_name, username, text, location, message.get("message_id")))
+                            asyncio.create_task(process_incoming_message_task(telegram_id, first_name, last_name, username, text, location, message.get("message_id"), photo=photo, document=document))
                             
                         elif callback_query:
                             from_user = callback_query.get("from", {})
@@ -6786,7 +7837,7 @@ async def handle_incoming_update(update: dict):
     callback_query = update.get("callback_query")
     
     if message:
-        if "text" not in message and "location" not in message:
+        if "text" not in message and "location" not in message and "photo" not in message and "document" not in message:
             return
         chat = message.get("chat", {})
         if chat.get("type") != "private":
@@ -6796,11 +7847,13 @@ async def handle_incoming_update(update: dict):
         first_name = from_user.get("first_name", "")
         last_name = from_user.get("last_name", "")
         username = from_user.get("username", "")
-        text = message.get("text", "").strip() if "text" in message else ""
+        text = message.get("text", "").strip() if "text" in message else message.get("caption", "").strip()
         location = message.get("location")
+        photo = message.get("photo")
+        document = message.get("document")
         
         logger.debug(f"[BOT WEBHOOK] Received message/location from {first_name} [ID: {telegram_id}]")
-        asyncio.create_task(process_incoming_message_task(telegram_id, first_name, last_name, username, text, location, message.get("message_id")))
+        asyncio.create_task(process_incoming_message_task(telegram_id, first_name, last_name, username, text, location, message.get("message_id"), photo=photo, document=document))
         
     elif callback_query:
         from_user = callback_query.get("from", {})

@@ -7,10 +7,17 @@ import time
 import logging
 
 logger = logging.getLogger(__name__)
+import html
 from collections import defaultdict
 from cryptography.fernet import Fernet
 from openpyxl import load_workbook
 from pypdf import PdfReader
+
+def escape_html(text: str) -> str:
+    """Safely escapes HTML tags and special characters for Telegram HTML parse mode."""
+    if not text:
+        return ""
+    return html.escape(str(text))
 
 # Setup key path
 DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))

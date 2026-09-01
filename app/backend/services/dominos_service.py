@@ -112,104 +112,32 @@ async def submit_dominos_order(order: Order, db: Session) -> dict:
     return {"success": True, "message": "Manual mode active"}
 
 def get_menu(city: str) -> List[Dict]:
-    """Fetch Domino's menu for a city using the scraper.
-    Returns a list of menu item dicts.
-    """
+    """Fetch Domino's menu from the database catalog."""
+    from ..database import SessionLocal, Product
+    db = SessionLocal()
     try:
-        from .dominos_scraper import get_menu as scraper_get_menu
-        return scraper_get_menu(city)
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).exception("Dominos menu fetch failed for %s", city)
-        raise
+        products = db.query(Product).filter(Product.availability == True).all()
+        return [{
+            "name": p.name,
+            "price": p.original_price,
+            "description": p.description,
+            "is_veg": p.is_veg,
+            "category": p.category
+        } for p in products]
+    finally:
+        db.close()
 
 async def sync_realtime_menu(location_input: str, db: Session, lat: float = None, lon: float = None):
     """
-    Fetches the real-time Domino's menu for the exact GPS location / Store ID
-    and syncs/upserts the items and store pricing into the Product database table.
+    Syncs/upserts the items and store pricing into the Product database table.
     """
     try:
-        from .dominos_scraper import geocode_address, get_menu_for_city
-        from ..database import Product
-        import json
-        
-        # 1. Resolve coordinates directly or via geocoding
-        if lat is None or lon is None:
-            lat, lon = await geocode_address(location_input or "Delhi")
-        
-        # 3. Fetch menu directly
-        menu_items = await get_menu_for_city(location_input or "Delhi")
-        if not menu_items:
-            return
-            
-        # 4. Sync to database
-        scraped_names = []
-        for it in menu_items:
-            name = it.get("name")
-            if not name:
-                continue
-            scraped_names.append(name)
-            
-            # Check if product already exists
-            product = db.query(Product).filter(Product.name == name).first()
-            
-            # Serialize crust and size options
-            crusts = json.dumps(it.get("crust_options", ["New Hand Tossed", "Cheese Burst", "Fresh Pan"]))
-            sizes = json.dumps(it.get("size_options", ["Regular", "Medium", "Large"]))
-            
-            # Determine category if not present
-            category = it.get("category")
-            if not category:
-                name_lower = name.lower()
-                if any(x in name_lower for x in ["pepsi", "coke", "mirinda", "7up", "fanta", "sprite", "water", "beverage", "lipton"]):
-                    category = "Drinks"
-                elif any(x in name_lower for x in ["choco", "cake", "mousse", "pudding", "brownie", "custard", "sweet", "dessert"]) and not any(y in name_lower for y in ["cheese", "pizza"]):
-                    category = "Desserts"
-                elif any(x in name_lower for x in ["garlic bread", "taco", "pasta", "fries", "dip", "pocket", "burger pizza", "crust", "pocket", "calzone"]):
-                    category = "Sides"
-                else:
-                    category = "Veg" if it.get("is_veg", True) else "Non-Veg"
-            
-            if product:
-                product.original_price = it.get("price", 199.0)
-                product.description = it.get("description") or product.description
-                if it.get("image_url"):
-                    product.image_url = it.get("image_url")
-                product.availability = True
-                product.is_veg = it.get("is_veg", True)
-                product.crust_options = crusts
-                product.size_options = sizes
-                product.category = category
-            else:
-                new_prod = Product(
-                    name=name,
-                    description=it.get("description") or f"Delicious {name} from your local Domino's.",
-                    category=category,
-                    is_veg=it.get("is_veg", True),
-                    original_price=it.get("price", 199.0),
-                    image_url=it.get("image_url") or "",
-                    availability=True,
-                    crust_options=crusts,
-                    size_options=sizes,
-                    sort_order=10,
-                )
-                db.add(new_prod)
-                
-        # 5. Mark other products as unavailable only in production live mode.
-        # In mock/testing mode, we keep all products active so the user can test full pagination.
-        is_testing = (os.getenv("TELEGRAM_BOT_TOKEN") == "MOCK_TOKEN" or not os.getenv("TELEGRAM_BOT_TOKEN"))
-        if is_testing:
-            db.query(Product).update({Product.availability: True}, synchronize_session=False)
-        elif len(scraped_names) > 5:
-            db.query(Product).filter(
-                Product.name != "Tomato Ketchup (Auto-Added)",
-                ~Product.name.in_(scraped_names)
-            ).update({Product.availability: False}, synchronize_session=False)
-        
-        db.commit()
+        from ..main import seed_database
+        seed_database()
     except Exception as e:
         import logging
         logging.getLogger(__name__).exception("sync_realtime_menu failed for %s", location_input)
+
 
 
 async def sync_realtime_menu_bg(location_input: str, lat: float = None, lon: float = None):

@@ -197,364 +197,15 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 # In-memory cache: only write to DB when domain actually changes (avoids per-request DB hit)
-_detected_domain_cache: str = ""
-
-class DomainDetectionMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        global _detected_domain_cache
-        host = request.headers.get("host", "")
-        x_forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-        scheme = "https" if "https" in x_forwarded_proto.lower() else request.url.scheme
-        
-        if host and not any(local in host for local in ("localhost", "127.0.0.1", "0.0.0.0")):
-            public_url = f"{scheme}://{host}"
-            # Only hit the DB when the domain actually changes (not on every request)
-            if public_url != _detected_domain_cache:
-                _detected_domain_cache = public_url
-                def _update_domain_sync():
-                    db = SessionLocal()
-                    try:
-                        from .database import SystemConfig
-                        cfg = db.query(SystemConfig).filter(SystemConfig.key == "mini_app_url").first()
-                        if not cfg or cfg.value != public_url:
-                            if not cfg:
-                                cfg = SystemConfig(key="mini_app_url", value=public_url)
-                                db.add(cfg)
-                            else:
-                                cfg.value = public_url
-                            db.commit()
-                            
-                            # Update bot's global MINI_APP_URL
-                            from . import bot
-                            bot.MINI_APP_URL = public_url
-                            logger.info(f"[AUTO DETECT] Updated mini_app_url to public domain: {public_url}")
-                    except Exception as e:
-                        db.rollback()
-                        logger.error(f"[AUTO DETECT] Failed to update domain: {e}")
-                    finally:
-                        db.close()
-                await asyncio.to_thread(_update_domain_sync)
-                
-        response = await call_next(request)
-        return response
-
-app.add_middleware(DomainDetectionMiddleware)
-
-
-# --- Server-Sent Events (SSE) Live Broadcast Manager ---
-
-class SSEManager:
-    def __init__(self):
-        self.active_connections: Set[asyncio.Queue] = set()
-
-    async def subscribe(self) -> asyncio.Queue:
-        # maxsize=100 so a slow client can't grow queue unboundedly
-        queue = asyncio.Queue(maxsize=100)
-        self.active_connections.add(queue)
-        return queue
-
-    def unsubscribe(self, queue: asyncio.Queue):
-        self.active_connections.discard(queue)
-
-    async def broadcast(self, data: dict):
-        message = f"data: {json.dumps(data)}\n\n"
-        dead = set()
-        for queue in list(self.active_connections):
-            try:
-                # Non-blocking put; drop oldest message if queue is full
-                if queue.full():
-                    try: queue.get_nowait()
-                    except Exception: pass
-                queue.put_nowait(message)
-            except Exception:
-                dead.add(queue)
-        for q in dead:
-            self.active_connections.discard(q)
-
-
-sse_manager = SSEManager()
-
-
-# --- WebSocket Manager for Real-Time Per-User Updates ---
-
-class WebSocketManager:
-    def __init__(self):
-        # Maps user_id -> list of active WebSocket connections
-        self._connections: Dict[int, List[WebSocket]] = {}
-
-    async def connect(self, user_id: int, websocket: WebSocket):
-        await websocket.accept()
-        if user_id not in self._connections:
-            self._connections[user_id] = []
-        self._connections[user_id].append(websocket)
-        logger.info(f"[WS] User {user_id} connected. Total connections: {sum(len(v) for v in self._connections.values())}")
-
-    def disconnect(self, user_id: int, websocket: WebSocket):
-        if user_id in self._connections:
-            self._connections[user_id] = [ws for ws in self._connections[user_id] if ws != websocket]
-            if not self._connections[user_id]:
-                del self._connections[user_id]
-        logger.info(f"[WS] User {user_id} disconnected.")
-
-    async def send_to_user(self, user_id: int, data: dict):
-        """Send a JSON message to all active WebSocket connections for a specific user."""
-        if user_id in self._connections:
-            dead = []
-            for ws in self._connections[user_id]:
-                try:
-                    await ws.send_json(data)
-                except Exception:
-                    dead.append(ws)
-            for ws in dead:
-                self._connections[user_id] = [x for x in self._connections[user_id] if x != ws]
-
-    async def broadcast_all(self, data: dict):
-        """Broadcast to all connected WebSocket clients."""
-        for user_id in list(self._connections.keys()):
-            await self.send_to_user(user_id, data)
-
-    def get_connected_user_ids(self) -> List[int]:
-        return list(self._connections.keys())
-
-    def total_connections(self) -> int:
-        return sum(len(v) for v in self._connections.values())
-
-
-ws_manager = WebSocketManager()
-
-
-# --- Inject callbacks into services and routes ---
-
-async def sse_broadcast_callback(data: dict):
-    await sse_manager.broadcast(data)
-
-
-async def ws_broadcast_callback(user_id: int, data: dict):
-    await ws_manager.send_to_user(user_id, data)
-
-
-# Inject into routes and bot modules
-routes.sse_broadcast_callback = sse_broadcast_callback
-routes.ws_broadcast_callback = ws_broadcast_callback
-bot.sse_broadcast_callback = sse_broadcast_callback
-
-# Inject into notification service
+# Web app features (SSE, WebSockets, Domain Detection) have been removed to focus exclusively on Telegram Bot.
+routes.sse_broadcast_callback = None
+routes.ws_broadcast_callback = None
+bot.sse_broadcast_callback = None
 notification_service.send_bot_message_func = bot.send_bot_message
 notification_service.send_bot_photo_func = bot.send_bot_photo
-notification_service.sse_broadcast_func = sse_broadcast_callback
-notification_service.ws_broadcast_func = ws_broadcast_callback
+notification_service.sse_broadcast_func = None
+notification_service.ws_broadcast_func = None
 
-
-# --- SSE Endpoint ---
-
-@app.get("/api/events")
-async def sse_events(request: Request, token: str = None):
-    """Server-Sent Events for real-time admin dashboard and mini-app updates."""
-    if not token:
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ")[1]
-        else:
-            token = request.query_params.get("token")
-
-    is_authorized = False
-    if token:
-        from .auth import verify_token
-        payload = verify_token(token)
-        if payload and "sub" in payload:
-            is_authorized = True
-
-    # Maintain compatibility with unit tests when running with mock token
-    if os.getenv("TELEGRAM_BOT_TOKEN") == "MOCK_TOKEN" and (not token or token == "MOCK_TOKEN"):
-        is_authorized = True
-
-    if not is_authorized:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=401, detail="Unauthorized events connection")
-
-    queue = await sse_manager.subscribe()
-
-    async def event_generator():
-        try:
-            yield 'data: {"type": "connected"}\n\n'
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    message = await asyncio.wait_for(queue.get(), timeout=10.0)
-                    yield message
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-                except Exception:
-                    break
-        finally:
-            sse_manager.unsubscribe(queue)
-
-    headers = {
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-        "Connection": "keep-alive",
-        "Content-Type": "text/event-stream",
-    }
-    return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
-
-
-# --- SSE Polling Fallback (for HTTP/2 proxy environments like Serveo) ---
-
-# A simple shared ring buffer of the last 30 events for poll clients
-_sse_event_ring: list = []
-_SSE_RING_MAX = 30
-_sse_ring_lock = asyncio.Lock()
-
-_original_broadcast = sse_manager.broadcast  # save ref
-
-async def _patched_broadcast(data: dict):
-    await _original_broadcast(data)
-    global _sse_event_ring
-    import time
-    async with _sse_ring_lock:
-        _sse_event_ring.append({"timestamp": time.time(), "data": data})
-        if len(_sse_event_ring) > _SSE_RING_MAX:
-            _sse_event_ring = _sse_event_ring[-_SSE_RING_MAX:]
-
-sse_manager.broadcast = _patched_broadcast
-
-
-@app.get("/api/events/poll")
-async def sse_poll(request: Request, since: float = 0.0, token: str = None):
-    """HTTP-poll fallback for environments where EventSource / HTTP/2 is broken.
-    Returns only events that occurred after the `since` timestamp (float Unix timestamp).
-    """
-    if not token:
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ")[1]
-        else:
-            token = request.query_params.get("token")
-
-    is_authorized = False
-    if token:
-        from .auth import verify_token
-        payload = verify_token(token)
-        if payload and "sub" in payload:
-            is_authorized = True
-
-    # Maintain compatibility with unit tests when running with mock token
-    if os.getenv("TELEGRAM_BOT_TOKEN") == "MOCK_TOKEN" and (not token or token == "MOCK_TOKEN"):
-        is_authorized = True
-
-    if not is_authorized:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=401, detail="Unauthorized events connection")
-
-    import time
-    timeout = 15.0
-    start_time = time.time()
-    events = []
-
-    while time.time() - start_time < timeout:
-        if await request.is_disconnected():
-            break
-        async with _sse_ring_lock:
-            events = [e["data"] for e in _sse_event_ring if e["timestamp"] > since]
-        if events:
-            break
-        await asyncio.sleep(0.3)
-
-    from fastapi.responses import JSONResponse
-    headers = {
-        "X-Server-Time": str(time.time()),
-        "Access-Control-Expose-Headers": "X-Server-Time"
-    }
-    return JSONResponse(content=events, headers=headers)
-
-
-
-# --- WebSocket Endpoint ---
-
-@app.websocket("/ws/{user_id}")
-async def websocket_endpoint(websocket: WebSocket, user_id: str, token: str = None):
-    """
-    Per-user WebSocket connection for real-time order tracking and notifications.
-    Client should send {"type": "ping"} heartbeats to maintain connection.
-    """
-    if not token:
-        token = websocket.query_params.get("token")
-        
-    try:
-        user_id_val = int(user_id)
-    except ValueError:
-        user_id_val = user_id
-
-    is_authorized = False
-    if token:
-        from .auth import verify_token
-        payload = verify_token(token)
-        if payload and "sub" in payload:
-            try:
-                token_sub = int(payload["sub"])
-            except ValueError:
-                token_sub = payload["sub"]
-
-            if token_sub == user_id_val or token_sub == 0:
-                is_authorized = True
-            else:
-                db = SessionLocal()
-                try:
-                    user = db.query(User).filter(User.id == token_sub).first()
-                    if user and user.role == "admin":
-                        is_authorized = True
-                finally:
-                    db.close()
-                    
-    # Maintain compatibility with unit tests when running with mock token
-    try:
-        mock_check = int(user_id) in (123456789, 111222, 999914, 999915, 999916, 999917, 999918)
-    except ValueError:
-        mock_check = False
-
-    if os.getenv("TELEGRAM_BOT_TOKEN") == "MOCK_TOKEN" and (not token or token == "MOCK_TOKEN" or mock_check):
-        is_authorized = True
-
-    if not is_authorized:
-        # Reject at HTTP level when token is completely absent (prevents accept→close loop spam)
-        if not token:
-            await websocket.close(code=1008)
-            return
-        await websocket.accept()
-        await websocket.send_json({"type": "error", "message": "Unauthorized WebSocket connection"})
-        await websocket.close(code=1008)
-        return
-
-    await ws_manager.connect(user_id, websocket)
-    try:
-        # Send connection acknowledgement
-        await websocket.send_json({"type": "connected", "user_id": user_id})
-
-        while True:
-            try:
-                data = await asyncio.wait_for(websocket.receive_json(), timeout=30.0)
-                if data.get("type") == "ping":
-                    await websocket.send_json({"type": "pong"})
-            except asyncio.TimeoutError:
-                # Send server heartbeat
-                await websocket.send_json({"type": "heartbeat"})
-            except WebSocketDisconnect:
-                break
-            except Exception:
-                break
-    finally:
-        ws_manager.disconnect(user_id, websocket)
-
-
-# --- WebSocket Stats Endpoint (Admin) ---
-
-@app.get("/api/ws/stats")
-async def ws_stats(admin: User = Depends(get_current_admin)):
-    return {
-        "connected_users": ws_manager.get_connected_user_ids(),
-        "total_connections": ws_manager.total_connections(),
-    }
 
 
 # --- Database Seeding ---
@@ -577,8 +228,409 @@ def seed_database():
                 "Cheeseburst Margherita (Medium)"
             ])
         ).delete(synchronize_session=False)
-        
-        # Ensure database changes are committed before continuing
+        db.commit()
+
+        DOMINOS_MENU_CATALOG = [
+            # Veg Pizzas (Regular Base Price)
+            {
+                "name": "Margherita",
+                "price": 109.0,
+                "description": "Classic delight with 100% real mozzarella cheese",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Double Cheese Margherita",
+                "price": 189.0,
+                "description": "The classic Margherita scaled up with double cheese!",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Peppy Paneer",
+                "price": 259.0,
+                "description": "Chunky paneer with spicy red paprika, capsicum & mozzarella",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Farmhouse",
+                "price": 259.0,
+                "description": "Delightful combination of onion, capsicum, tomato & grilled mushroom",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Veggie Paradise",
+                "price": 259.0,
+                "description": "Gold corn, black olives, capsicum & red paprika",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Indi Tandoori Paneer",
+                "price": 309.0,
+                "description": "Tandoori paneer with capsicum, red paprika & mint mayo",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Veg Extravaganza",
+                "price": 309.0,
+                "description": "Black olives, capsicum, onion, grilled mushroom, corn, tomato, jalapeno & extra cheese",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Cheese n Corn",
+                "price": 189.0,
+                "description": "Sweet & juicy golden corn with 100% real mozzarella cheese",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Mexican Green Wave",
+                "price": 259.0,
+                "description": "Loaded with crunchy onions, juicy tomatoes, capsicum & jalapenos",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Paneer Makhani",
+                "price": 259.0,
+                "description": "Flavorful paneer, capsicum & red paprika with traditional Makhani sauce",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Achari Do Pyaza",
+                "price": 189.0,
+                "description": "Tangy achari flavors with crunchy onions and cheese",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Fresh Veggie",
+                "price": 189.0,
+                "description": "Delectable combination of onion & capsicum",
+                "is_veg": True,
+                "category": "Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            # Non-Veg Pizzas (Regular Base Price)
+            {
+                "name": "Chicken Pepperoni",
+                "price": 339.0,
+                "description": "Classic chicken pepperoni with mozzarella cheese",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Non-Veg Supreme",
+                "price": 339.0,
+                "description": "Bite into hot n spicy chicken, chicken meatballs, onion & herby chicken sausage",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Chicken Golden Delight",
+                "price": 279.0,
+                "description": "Mouth-watering chicken kebab, sweet corn, double cheese",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Indi Chicken Tikka",
+                "price": 339.0,
+                "description": "Tandoori masala with chicken tikka, onion, red paprika & mint mayo",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Pepper Barbecue Chicken",
+                "price": 249.0,
+                "description": "Pepper barbecue chicken for that extra spicy kick",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Chicken Dominator",
+                "price": 369.0,
+                "description": "Loaded with 4 different chicken toppings: barbecue, tikka, meatballs & sausage",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Chicken Fiesta",
+                "price": 279.0,
+                "description": "Grilled chicken rashers, peri-peri chicken, onion & capsicum",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Spiced Double Chicken",
+                "price": 279.0,
+                "description": "Pepper barbecue chicken & spicy chicken sausage",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            {
+                "name": "Chicken Sausage",
+                "price": 199.0,
+                "description": "American classic with spicy chicken sausage",
+                "is_veg": False,
+                "category": "Non-Veg",
+                "crust_options": ["New Hand Tossed", "Cheese Burst", "Fresh Pan"],
+                "size_options": ["Regular", "Medium", "Large"]
+            },
+            # Pizza Mania
+            {
+                "name": "Onion Pizza Mania",
+                "price": 69.0,
+                "description": "Crunchy onion topping with mozzarella cheese",
+                "is_veg": True,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Golden Corn Pizza Mania",
+                "price": 79.0,
+                "description": "Juicy sweet corn with mozzarella cheese",
+                "is_veg": True,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Capsicum Pizza Mania",
+                "price": 79.0,
+                "description": "Fresh green capsicum with mozzarella cheese",
+                "is_veg": True,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Paneer n Onion Pizza Mania",
+                "price": 99.0,
+                "description": "Chunky paneer and crunchy onion",
+                "is_veg": True,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+            {
+                "name": "Cheesy Pizza Mania",
+                "price": 99.0,
+                "description": "Loaded with extra creamy liquid cheese",
+                "is_veg": True,
+                "category": "Mania",
+                "crust_options": ["Classic Hand Tossed"],
+                "size_options": ["Regular"]
+            },
+            # Sides & Snacks
+            {
+                "name": "Garlic Breadsticks",
+                "price": 109.0,
+                "description": "Baked to perfection, garlic-buttered breadsticks served with seasoning",
+                "is_veg": True,
+                "category": "Sides"
+            },
+            {
+                "name": "Stuffed Garlic Bread",
+                "price": 159.0,
+                "description": "Freshly baked garlic bread stuffed with mozzarella cheese, sweet corn, and jalapenos",
+                "is_veg": True,
+                "category": "Sides"
+            },
+            {
+                "name": "Paneer Tikka Garlic Bread",
+                "price": 179.0,
+                "description": "Stuffed garlic bread with spicy paneer tikka & cheese",
+                "is_veg": True,
+                "category": "Sides"
+            },
+            {
+                "name": "Taco Mexicana Veg",
+                "price": 139.0,
+                "description": "Crispy taco shell filled with spicy veg patty & creamy sauce",
+                "is_veg": True,
+                "category": "Sides"
+            },
+            {
+                "name": "Taco Mexicana Non-Veg",
+                "price": 169.0,
+                "description": "Crispy taco shell filled with hot chicken patty & sauce",
+                "is_veg": False,
+                "category": "Sides"
+            },
+            {
+                "name": "Veg Parcel",
+                "price": 59.0,
+                "description": "Golden brown pastry filled with creamy harissa veg filling",
+                "is_veg": True,
+                "category": "Sides"
+            },
+            {
+                "name": "Chicken Parcel",
+                "price": 69.0,
+                "description": "Golden brown pastry filled with spicy chicken filling",
+                "is_veg": False,
+                "category": "Sides"
+            },
+            {
+                "name": "Cheesy Dip",
+                "price": 30.0,
+                "description": "Creamy melted cheese dip",
+                "is_veg": True,
+                "category": "Sides"
+            },
+            # Desserts
+            {
+                "name": "Choco Lava Cake",
+                "price": 109.0,
+                "description": "Gooey molten chocolate lava inside a soft cocoa cake",
+                "is_veg": True,
+                "category": "Desserts"
+            },
+            {
+                "name": "Butterscotch Mousse Cup",
+                "price": 99.0,
+                "description": "Sweet butterscotch mousse whipped to creamy perfection",
+                "is_veg": True,
+                "category": "Desserts"
+            },
+            {
+                "name": "Red Velvet Lava Cake",
+                "price": 129.0,
+                "description": "Rich red velvet cake with melted white chocolate center",
+                "is_veg": True,
+                "category": "Desserts"
+            },
+            # Beverages / Drinks
+            {
+                "name": "Pepsi 500ml",
+                "price": 60.0,
+                "description": "Sparkling refreshment to complete your meal",
+                "is_veg": True,
+                "category": "Drinks"
+            },
+            {
+                "name": "Pepsi Black 500ml",
+                "price": 60.0,
+                "description": "Zero sugar sparkling cola",
+                "is_veg": True,
+                "category": "Drinks"
+            },
+            {
+                "name": "7Up 500ml",
+                "price": 60.0,
+                "description": "Refreshing clear lemon lime beverage",
+                "is_veg": True,
+                "category": "Drinks"
+            },
+            {
+                "name": "Mirinda 500ml",
+                "price": 60.0,
+                "description": "Fruity orange fizzy drink",
+                "is_veg": True,
+                "category": "Drinks"
+            },
+            {
+                "name": "Mountain Dew 500ml",
+                "price": 60.0,
+                "description": "High-energy citrus drink",
+                "is_veg": True,
+                "category": "Drinks"
+            },
+            {
+                "name": "Mineral Water 1L",
+                "price": 30.0,
+                "description": "Packaged drinking water",
+                "is_veg": True,
+                "category": "Drinks"
+            }
+        ]
+        import json
+
+        for it in DOMINOS_MENU_CATALOG:
+            name = it["name"]
+            product = db.query(Product).filter(Product.name == name).first()
+            
+            crusts = json.dumps(it.get("crust_options", ["New Hand Tossed", "Cheese Burst", "Fresh Pan"]))
+            sizes = json.dumps(it.get("size_options", ["Regular", "Medium", "Large"]))
+            category = it["category"]
+            
+            if product:
+                product.original_price = it["price"]
+                product.description = it["description"]
+                product.availability = True
+                product.is_veg = it["is_veg"]
+                product.crust_options = crusts
+                product.size_options = sizes
+                product.category = category
+            else:
+                new_prod = Product(
+                    name=name,
+                    description=it["description"],
+                    category=category,
+                    is_veg=it["is_veg"],
+                    original_price=it["price"],
+                    image_url="",
+                    availability=True,
+                    crust_options=crusts,
+                    size_options=sizes,
+                    sort_order=10,
+                )
+                db.add(new_prod)
+        db.commit()
+
+        # Remove Tomato Pizza Mania if present in database as requested by user
+        db.query(Product).filter(Product.name == "Tomato Pizza Mania").delete(synchronize_session=False)
+
+        # Remove obsolete SystemConfig keys requested by user
+        obsolete_keys = ["newbie_coupon", "welcome_coupon", "cart_promo_min", "cart_promo_max", "cart_promo_fixed", "captcha_api_key", "mini_app_url"]
+        db.query(SystemConfig).filter(SystemConfig.key.in_(obsolete_keys)).delete(synchronize_session=False)
         db.commit()
 
         # Seed default admin (only if explicitly set in environment to avoid mock user seeding)
@@ -597,19 +649,12 @@ def seed_database():
                 db.commit()
                 logger.info(f"Admin user seeded with Telegram ID {admin_tg_id}.")
 
-        # Seed default system configurations
+        # Seed essential default system configurations only
         default_configs = {
-            "newbie_coupon": "NEWBIE100",
-            "welcome_coupon": "WELCOME90",
-            "cart_promo_min": "180.0",
-            "cart_promo_max": "220.0",
-            "cart_promo_fixed": "100.0",
             "bot_fee": "10.0",
             "upi_id": "dominos@upi",
             "upi_name": "Domino's Order Engine",
             "platform_name": "Domino's Order Engine",
-            "captcha_api_key": os.getenv("CAPTCHA_API_KEY", ""),
-            "mini_app_url": os.getenv("MINI_APP_URL", "http://localhost:8000"),
         }
         for k, v in default_configs.items():
             cfg = db.query(SystemConfig).filter(SystemConfig.key == k).first()

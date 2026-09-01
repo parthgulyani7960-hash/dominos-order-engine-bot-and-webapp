@@ -1,11 +1,7 @@
-app/backend/firebase-key.json
-app/backend/firebase-key.json
 *.pyc
-data/*.db-shm
-*.pyc
-data/*.db-shm
-data/*.db-wal
 __pycache__/
-*.pyc
+*.zip
+data/*.db
 data/*.db-shm
 data/*.db-wal
+app/backend/firebase-key.json

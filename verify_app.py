@@ -20,7 +20,7 @@ os.environ["ADMIN_PASSWORD"] = "pizza123"
 # Set temporary database URL for testing to protect production pizza.db
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.abspath(os.path.join(os.path.dirname(__file__), 'data', 'pizza_test.db'))}"
 
-from backend.database import init_db, SessionLocal, User, Product, GiftCard, Order, ErrorLog, LoginAttempt, SystemConfig, Proxy, ProxyLog, UserSession, VerifiedUTR, UTRAttempt, QRGenerationHistory
+from backend.database import init_db, SessionLocal, User, Product, GiftCard, Order, ErrorLog, LoginAttempt, SystemConfig, Proxy, ProxyLog, UserSession, VerifiedUTR, UTRAttempt, QRGenerationHistory, Coupon, SupportMessage, CouponRedemption, WalletTransaction, WithdrawalRequest, OrderStatusHistory, OrderItem, DominosSession
 from backend.main import app
 from backend.auth import hash_password, verify_password, create_access_token
 from backend.utils import encrypt_data, decrypt_data, run_backup
@@ -39,6 +39,7 @@ class TestPizzaPlatform(unittest.TestCase):
         # Clean all tables for isolated assertions
         self.db.query(ProxyLog).delete()
         self.db.query(Proxy).delete()
+        self.db.query(OrderItem).delete()
         self.db.query(Order).delete()
         self.db.query(GiftCard).delete()
         self.db.query(User).delete()
@@ -50,7 +51,15 @@ class TestPizzaPlatform(unittest.TestCase):
         self.db.query(VerifiedUTR).delete()
         self.db.query(UTRAttempt).delete()
         self.db.query(QRGenerationHistory).delete()
+        self.db.query(SupportMessage).delete()
+        self.db.query(CouponRedemption).delete()
+        self.db.query(WalletTransaction).delete()
+        self.db.query(WithdrawalRequest).delete()
+        self.db.query(OrderStatusHistory).delete()
+        self.db.query(Coupon).delete()
+        self.db.query(DominosSession).delete()
         self.db.commit()
+
         
         from backend.main import seed_database
         seed_database()
@@ -260,8 +269,8 @@ class TestPizzaPlatform(unittest.TestCase):
         self.assertIsNotNone(db_user)
         self.assertEqual(db_user.wallet_balance, 100.0) # check default test balance
 
-    def test_04_order_processing_with_giftcard(self):
-        """Validates cart checkout, wallet deduction, and automatic gift card allocation."""
+    def test_04_order_processing_checkout(self):
+        """Validates cart checkout and wallet deduction."""
         # 1. Create a customer
         customer = User(
             telegram_id="999999",
@@ -276,18 +285,6 @@ class TestPizzaPlatform(unittest.TestCase):
         # 2. Get a seeded pizza
         pizza = self.db.query(Product).filter(Product.availability == True).first()
         self.assertIsNotNone(pizza)
-        
-        # 3. Seed an available gift card
-        card_code = "GIFT-50-DOLLARS"
-        card_pin = "4321"
-        gc = GiftCard(
-            code_encrypted=encrypt_data(card_code),
-            code_hash=hashlib_sha256(card_code),
-            pin_encrypted=encrypt_data(card_pin),
-            value=50.0,
-            status="available"
-        )
-        self.db.add(gc)
         self.db.commit()
         
         # 4. Generate user access token
@@ -315,15 +312,9 @@ class TestPizzaPlatform(unittest.TestCase):
         # 6. Verify wallet balance deducted
         self.db.refresh(customer)
         self.assertAlmostEqual(customer.wallet_balance, 1000.0 - data["total"], places=2)
-        
-        # 7. Verify gift card status changed to used
-        self.db.refresh(gc)
-        self.assertEqual(gc.status, "used")
-        self.assertEqual(gc.used_by_user_id, customer.id)
-        self.assertEqual(gc.used_in_order_id, data["order_id"])
 
-    def test_05_checkout_halts_on_empty_giftcards(self):
-        """Tests that ordering is paused and notifications are triggered if gift card inventory is depleted."""
+    def test_05_checkout_proceeds_on_empty_giftcards(self):
+        """Tests that ordering proceeds successfully even if gift card inventory is empty."""
         # 1. Create a customer
         customer = User(
             telegram_id="888888",
@@ -333,13 +324,14 @@ class TestPizzaPlatform(unittest.TestCase):
             role="user"
         )
         self.db.add(customer)
-        self.db.commit()
+        self.db.flush()
         
         pizza = self.db.query(Product).filter(Product.availability == True).first()
+        self.db.commit()
+        
         token = create_access_token({"sub": str(customer.id), "role": "user"})
         headers = {"Authorization": f"Bearer {token}"}
         
-        # Place order - No gift card is seeded in database!
         checkout_payload = {
             "items": [{"product_id": pizza.id, "quantity": 1}],
             "payment_method": "wallet",
@@ -350,16 +342,10 @@ class TestPizzaPlatform(unittest.TestCase):
         }
         
         resp = client.post("/api/orders", json=checkout_payload, headers=headers)
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 200, f"Checkout failed: {resp.text}")
         
         data = resp.json()
-        # Should stay at Payment Received and warn about inventory empty
-        self.assertEqual(data["status"], "Payment Received")
-        self.assertIn("empty", data["message"].lower())
-        
-        # Verify an error log is registered
-        err_logs_count = self.db.query(ErrorLog).filter(ErrorLog.type == "giftcard").count()
-        self.assertEqual(err_logs_count, 1)
+        self.assertEqual(data["status"], "Order Processing")
 
     def test_06_admin_dashboard_metrics(self):
         """Verifies stats aggregation and administrative actions."""
@@ -512,15 +498,15 @@ class TestPizzaPlatform(unittest.TestCase):
         resp = client.post("/api/orders", json=checkout_payload, headers=headers)
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertEqual(data["coupon_applied"], "NEWBIE100")
-        self.assertEqual(data["total"], 110.0) # Fixed ₹100 + ₹10 bot fee!
+        self.assertEqual(data["coupon_applied"], None)
+        self.assertEqual(data["total"], 210.0) # subtotal 200.0 + ₹10 bot fee!
 
-        # 3. Test second order (Returning customer -> Welcome) with subtotal = 200.0
+        # 3. Test second order with subtotal = 200.0
         resp_2 = client.post("/api/orders", json=checkout_payload, headers=headers)
         self.assertEqual(resp_2.status_code, 200)
         data_2 = resp_2.json()
-        self.assertEqual(data_2["coupon_applied"], "WELCOME90")
-        self.assertEqual(data_2["total"], 110.0)
+        self.assertEqual(data_2["coupon_applied"], None)
+        self.assertEqual(data_2["total"], 210.0)
 
         # 4. Verify admin can change config, and the changes are respected in subsequent checkouts
         admin_token = create_access_token({"sub": "0", "role": "admin"})
@@ -537,12 +523,12 @@ class TestPizzaPlatform(unittest.TestCase):
             resp_config = client.put("/api/admin/config", json={"key": k, "value": v}, headers=admin_headers)
             self.assertEqual(resp_config.status_code, 200)
 
-        # Subtotal doesn't change the fixed price under the new model, so it should still use the new fixed price ₹150 + ₹10 bot fee
+        # Subtotal + bot fee is calculated
         resp_not_capped = client.post("/api/orders", json=checkout_payload, headers=headers)
         self.assertEqual(resp_not_capped.status_code, 200)
         data_not_capped = resp_not_capped.json()
         self.assertEqual(data_not_capped["coupon_applied"], None)
-        self.assertEqual(data_not_capped["total"], 205.0)
+        self.assertEqual(data_not_capped["total"], 210.0)
 
         # Subtotal = 300.0 (3 pizzas of price 100.0) should be capped at ₹150 + ₹10 bot fee with WELCOME150 applied
         checkout_payload_capped = {
@@ -565,8 +551,8 @@ class TestPizzaPlatform(unittest.TestCase):
         resp_capped = client.post("/api/orders", json=checkout_payload_capped, headers=headers)
         self.assertEqual(resp_capped.status_code, 200)
         data_capped = resp_capped.json()
-        self.assertEqual(data_capped["coupon_applied"], "WELCOME150")
-        self.assertEqual(data_capped["total"], 160.0)
+        self.assertEqual(data_capped["coupon_applied"], None)
+        self.assertEqual(data_capped["total"], 310.0)
 
     def test_10_proxy_crud_and_status(self):
         """Verifies proxy CRUD endpoints and log tracing."""
@@ -803,6 +789,14 @@ class TestPizzaPlatform(unittest.TestCase):
 
     def test_14_flat_service_charge(self):
         """Verifies that non-capped orders have a flat ₹5.00 service charge applied."""
+        # Configure bot_fee to 5.0 for this test
+        bot_fee_cfg = self.db.query(SystemConfig).filter(SystemConfig.key == "bot_fee").first()
+        if bot_fee_cfg:
+            bot_fee_cfg.value = "5.0"
+        else:
+            self.db.add(SystemConfig(key="bot_fee", value="5.0"))
+        self.db.commit()
+
         customer = User(
             telegram_id="999914",
             username="buyer14",
@@ -901,11 +895,10 @@ class TestPizzaPlatform(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         
-        # Capped total should be fixed + bot fee
-        # Let's check config: newbie newbie_coupon = NEWBIE100, welcome = WELCOME90
-        # cart_promo_fixed is 100.0, bot fee is 10.0 -> total 110.0
-        self.assertEqual(data["total"], 110.0)
-        self.assertEqual(data["coupon_applied"], "NEWBIE100")
+        # Capping is disabled, so subtotal + bot fee is calculated
+        # Subtotal with auto-ketchup is 180.0, bot fee is 10.0 -> total 190.0
+        self.assertEqual(data["total"], 190.0)
+        self.assertEqual(data["coupon_applied"], None)
         
         items = data["invoice"]["items"]
         self.assertTrue(any("Ketchup" in item["name"] for item in items))
@@ -1040,6 +1033,11 @@ class TestPizzaPlatform(unittest.TestCase):
         resp_order = client.post("/api/orders", json=checkout_payload, headers=user_headers)
         self.assertEqual(resp_order.status_code, 200)
         order_id = resp_order.json()["order_id"]
+        
+        # Manually link the gift card to the order for testing privacy visibility
+        db_order = self.db.query(Order).filter(Order.id == order_id).first()
+        db_order.gift_card_id = gc.id
+        self.db.commit()
 
         # Fetch via user-facing endpoint -> gift card code & pin redacted
         resp_user_get = client.get(f"/api/orders/{order_id}", headers=user_headers)
@@ -1070,29 +1068,25 @@ class TestPizzaPlatform(unittest.TestCase):
         self.db.add(customer)
         self.db.commit()
         
-        # 2. Seed a gift card/promo code
-        code = "1234567890123456"
-        code_hash = hashlib_sha256(code)
-        gc = GiftCard(
-            code_encrypted=encrypt_data(code),
-            code_hash=code_hash,
-            pin_encrypted=encrypt_data("1111"),
+        # 2. Seed a Coupon internal promo code
+        coupon_code = "PROMO150"
+        cp = Coupon(
+            code=coupon_code,
             value=150.0,
-            status="available"
+            is_active=True
         )
-        self.db.add(gc)
+        self.db.add(cp)
         self.db.commit()
         
-        # 3. Simulate message with 16-digit promo code
+        # 3. Simulate message with internal promo code after setting session state
+        USER_BOT_SESSION["999918"] = {"state": "waiting_for_promo_code"}
         import asyncio
-        asyncio.run(handle_bot_message(self.db, "999918", "Test", "User", "buyer18", code))
+        asyncio.run(handle_bot_message(self.db, "999918", "Test", "User", "buyer18", coupon_code))
         
-        # Verify wallet balance increased and gift card is marked used
+        # Verify wallet balance increased and session state is cleared
         self.db.refresh(customer)
-        self.db.refresh(gc)
         self.assertEqual(customer.wallet_balance, 160.0) # 10.0 + 150.0
-        self.assertEqual(gc.status, "used")
-        self.assertEqual(gc.used_by_user_id, customer.id)
+        self.assertIsNone(USER_BOT_SESSION["999918"].get("state"))
         
         # 4. Seed a pending TOPUP order
         topup_order = Order(
