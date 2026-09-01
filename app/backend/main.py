@@ -707,6 +707,15 @@ async def schedule_daily_backup():
 
 # --- API and Static Routes ---
 
+@app.get("/")
+async def root():
+    return {
+        "status": "online",
+        "service": "Domino's Order Engine Platform v2.0",
+        "health": "/health",
+        "docs": "/api/docs"
+    }
+
 app.include_router(api_router, prefix="/api")
 
 UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads"))
