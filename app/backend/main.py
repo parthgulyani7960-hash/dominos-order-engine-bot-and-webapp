@@ -707,7 +707,7 @@ async def schedule_daily_backup():
 
 # --- API and Static Routes ---
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {
         "status": "online",

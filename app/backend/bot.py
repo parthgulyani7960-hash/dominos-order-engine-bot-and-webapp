@@ -7788,9 +7788,12 @@ async def run_bot_polling():
                             task = asyncio.create_task(process_bot_callback_task(telegram_id, first_name, last_name, username, cb_data, message_id, callback_query_id))
                             USER_CALLBACK_TASKS[user_key] = task
             elif resp.status_code == 409:
-                # Another bot instance is already polling — wait longer and retry
-                logger.warning("[BOT] 409 Conflict: another instance is polling. Waiting 15s before retry...")
-                await asyncio.sleep(15)
+                # Another instance/old container is shutting down — clear webhook & wait 5s to acquire slot
+                try:
+                    await _http_client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook", json={"drop_pending_updates": True}, timeout=5.0)
+                except Exception:
+                    pass
+                await asyncio.sleep(5)
             elif resp.status_code == 429:
                 # Rate limited — respect Retry-After header
                 retry_after = int(resp.headers.get("Retry-After", "10"))

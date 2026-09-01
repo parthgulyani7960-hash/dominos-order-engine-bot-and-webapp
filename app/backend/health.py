@@ -31,7 +31,7 @@ router = APIRouter(tags=["health"])
 # Liveness
 # ---------------------------------------------------------------------------
 
-@router.get("/health", status_code=status.HTTP_200_OK, summary="Liveness probe")
+@router.api_route("/health", methods=["GET", "HEAD"], status_code=status.HTTP_200_OK, summary="Liveness probe")
 async def health_check() -> Dict[str, Any]:
     """Always returns 200 while the process is alive."""
     return {"status": "healthy", "environment": settings.ENV}
@@ -68,7 +68,7 @@ async def _check_redis() -> bool:
         return False
 
 
-@router.get("/ready", summary="Readiness probe")
+@router.api_route("/ready", methods=["GET", "HEAD"], summary="Readiness probe")
 async def readiness_check() -> JSONResponse:
     """Returns 200 when all critical dependencies are reachable, else 503."""
     pg_ok, redis_ok = await asyncio.gather(_check_postgres(), _check_redis())
