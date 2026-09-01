@@ -1145,9 +1145,9 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
         badge_str = "  " + " ".join(badges) if badges else ""
 
         menu_lines.append(
-            f"{veg_dot} <b>[{display_code}] {p.name}</b>{badge_str}\n"
-            f"   💰 Price: {price_str}\n"
-            f"   📝 <i>{(p.description or 'Freshly prepared Domino\'s pizza with 100% mozzarella cheese.')[:85]}</i>"
+            f"{veg_dot} <b>{p.name}</b> [{display_code}]{badge_str}\n"
+            f"   💳 MRP Price: {price_str}\n"
+            f"   📝 <i>{(p.description or 'Freshly prepared Domino\'s item with 100% mozzarella cheese.')[:90]}</i>"
         )
 
     menu_lines.append(

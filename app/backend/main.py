@@ -837,16 +837,12 @@ def seed_database():
                 "description": "Natural Mango / Orange / Mixed Fruit juice",
                 "is_veg": True,
                 "category": "Drinks"
-            },
-            {
-                "name": "Unlimited Coke",
-                "price": 75.0,
-                "description": "Unlimited fountain refills on Coca-Cola",
-                "is_veg": True,
-                "category": "Drinks"
             }
         ]
         import json
+
+        # Delete Unlimited Coke if present in database as requested
+        db.query(Product).filter(Product.name == "Unlimited Coke").delete(synchronize_session=False)
 
         for it in DOMINOS_MENU_CATALOG:
             name = it["name"]
