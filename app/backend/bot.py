@@ -1052,14 +1052,7 @@ async def display_delivery_location_menu(db: Session, user: User):
     session = USER_BOT_SESSION.setdefault(user.telegram_id, {"cart": {}, "state": None})
     session["state"] = "in_location_menu"
     
-    # Pricing multiplier display for city
-    multiplier = 1.0
-    if user.city:
-        loc_pricing = db.query(LocationPricing).filter(LocationPricing.city.ilike(user.city)).first()
-        if loc_pricing:
-            multiplier = loc_pricing.price_multiplier
-            
-    city_disp = f"<b>{user.city or 'Not set'}</b> ({multiplier:.1f}x pricing)" if user.city else "<i>Not set</i>"
+    city_disp = f"<b>{user.city}</b>" if user.city else "<i>Not set</i>"
     
     if user.latitude is not None and user.longitude is not None:
         coord_line = f"\n📡 <b>GPS Location:</b> <code>{user.latitude:.5f}, {user.longitude:.5f}</code>"
@@ -1110,13 +1103,6 @@ async def display_delivery_location_menu(db: Session, user: User):
 
 async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: int = 1, category: str = "All", edit_message_id: int = None):
     """Displays the menu containing all pizzas as rich text with full pricing, types, and category filters."""
-    multiplier = 1.0
-    loc = None
-    if user.city:
-        loc = db.query(LocationPricing).filter(LocationPricing.city.ilike(user.city)).first()
-    if loc:
-        multiplier = loc.price_multiplier
-
     query = db.query(Product).filter(Product.availability == True)
     if category != "All":
         if category.lower() in ("veg", "non-veg"):
@@ -1167,8 +1153,8 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
     ]
 
     for p in page_products:
-        original = float(round(p.original_price * multiplier))
-        effective = float(round(p.discounted_price * multiplier)) if p.discounted_price is not None else original
+        original = float(round(p.original_price))
+        effective = float(round(p.discounted_price)) if p.discounted_price is not None else original
 
         veg_dot = "🟢" if p.is_veg else "🔴"
         display_code = id_to_code.get(p.id, "—")
@@ -1202,7 +1188,7 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
     grid = []
     row = []
     for p in page_products:
-        effective = float(round(p.discounted_price * multiplier)) if p.discounted_price is not None else float(round(p.original_price * multiplier))
+        effective = float(round(p.discounted_price)) if p.discounted_price is not None else float(round(p.original_price))
         name_limit = p.name[:14] + "…" if len(p.name) > 16 else p.name
         veg_icon = "🟢" if p.is_veg else "🔴"
         row.append({"text": f"➕ {veg_icon} {name_limit} (₹{effective:.0f})", "callback_data": f"cart_add_{p.id}"})
@@ -1419,11 +1405,6 @@ def render_order_confirmation_screen(db: Session, user: User, session: dict) -> 
     phone   = session.get("temp_phone")
     multiplier = 1.0
     delivery_charge = 30.0
-    if user.city:
-        loc = db.query(LocationPricing).filter(LocationPricing.city.ilike(user.city)).first()
-        if loc:
-            multiplier = loc.price_multiplier
-            delivery_charge = loc.delivery_charge
 
     cart = session.get("cart", {})
     active_deal = session.get("active_deal")
@@ -1435,7 +1416,7 @@ def render_order_confirmation_screen(db: Session, user: User, session: dict) -> 
             qty = parse_cart_quantity(raw_qty)
             p = resolve_cart_item_product(db, pid_str)
             if p:
-                price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
+                price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
                 subtotal += price * qty
 
     bot_fee = get_bot_fee(db)
@@ -1446,7 +1427,7 @@ def render_order_confirmation_screen(db: Session, user: User, session: dict) -> 
         qty = parse_cart_quantity(raw_qty)
         p = resolve_cart_item_product(db, pid_str)
         if p:
-            price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
+            price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
             veg_dot = "🟢" if p.is_veg else "🔴"
             item_lines.append(f"  {veg_dot} <b>{p.name}</b> ×{qty}" if active_deal else f"  {veg_dot} <b>{p.name}</b> ×{qty}  —  ₹{price * qty:.0f}")
     items_text = "\n".join(item_lines) if item_lines else "  • Pizza Items"
@@ -3418,14 +3399,8 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         address = session.get("temp_address", "Default Address")
         phone = phone_formatted
         
-        # Calculate pricing based on location multiplier
         multiplier = 1.0
         delivery_charge = 30.0
-        if user.city:
-            loc = db.query(LocationPricing).filter(LocationPricing.city.ilike(user.city)).first()
-            if loc:
-                multiplier = loc.price_multiplier
-                delivery_charge = loc.delivery_charge
 
         active_deal = session.get("active_deal")
         if active_deal:
@@ -3436,7 +3411,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 qty = parse_cart_quantity(raw_qty)
                 p = resolve_cart_item_product(db, product_id_str)
                 if p:
-                    price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
+                    price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
                     subtotal += (price * qty)
                 
         # Fetch bot service fee
@@ -3449,7 +3424,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             qty = parse_cart_quantity(raw_qty)
             p = resolve_cart_item_product(db, product_id_str)
             if p:
-                price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
+                price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
                 if active_deal:
                     item_lines.append(f"  • <b>{p.name}</b> x{qty}")
                 else:
@@ -4444,14 +4419,8 @@ def render_cart_message(db: Session, user: User, cart: dict, session: dict = Non
     subtotal = 0.0
     inline_keyboard = []
 
-    # Fetch price multiplier and delivery charge based on user city
     multiplier = 1.0
     delivery_charge = 30.0
-    if user.city:
-        loc = db.query(LocationPricing).filter(LocationPricing.city.ilike(user.city)).first()
-        if loc:
-            multiplier = loc.price_multiplier
-            delivery_charge = loc.delivery_charge
             
     active_deal = session.get("active_deal") if session else None
     if active_deal:
@@ -4468,7 +4437,7 @@ def render_cart_message(db: Session, user: User, cart: dict, session: dict = Non
         p = resolve_cart_item_product(db, product_id_str)
         if not p:
             continue
-        price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
+        price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
         item_total = price * qty
         if not active_deal:
             subtotal += item_total
@@ -5133,11 +5102,6 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         
         multiplier = 1.0
         delivery_charge = 30.0
-        if user.city:
-            loc = db.query(LocationPricing).filter(LocationPricing.city.ilike(user.city)).first()
-            if loc:
-                multiplier = loc.price_multiplier
-                delivery_charge = loc.delivery_charge
 
         cart = session.get("cart", {})
         active_deal = session.get("active_deal")
@@ -5149,7 +5113,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 product_id = product_id_str  # Product.id is a UUID string
                 p = db.query(Product).filter(Product.id == product_id).first()
                 if p:
-                    price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
+                    price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
                     subtotal += (price * qty)
                 
         bot_fee = get_bot_fee(db)
@@ -5159,7 +5123,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         for product_id_str, qty in list(cart.items()):
             p = db.query(Product).filter(Product.id == product_id_str).first()
             if p:
-                price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
+                price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
                 if active_deal:
                     item_lines.append(f"  • {p.name} x{qty}")
                 else:
@@ -8046,14 +8010,8 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             session["state"] = None
             return
             
-        # Calculate pricing based on location multiplier
         multiplier = 1.0
         delivery_charge = 30.0
-        if user.city:
-            loc = db.query(LocationPricing).filter(LocationPricing.city.ilike(user.city)).first()
-            if loc:
-                multiplier = loc.price_multiplier
-                delivery_charge = loc.delivery_charge
 
         active_deal = session.get("active_deal")
         if active_deal:
@@ -8064,7 +8022,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 qty = parse_cart_quantity(raw_qty)
                 p = resolve_cart_item_product(db, product_id_str)
                 if p:
-                    price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
+                    price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
                     subtotal += (price * qty)
                 
         # Fetch bot service fee

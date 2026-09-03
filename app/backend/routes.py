@@ -732,16 +732,8 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
     has_ketchup = False
     ketchup_qty = 0
 
-    # Apply location-based price adjustment
+    # Fixed menu pricing for everyone
     multiplier = 1.0
-    if user.city:
-        pricing = db.query(LocationPricing).filter(LocationPricing.city.ilike(f"%{user.city}%")).first()
-        if pricing:
-            multiplier = pricing.price_multiplier
-        else:
-            multiplier = 1.0
-    else:
-        multiplier = 1.0
 
     # 1. Calculate prices and validate stock
     for item in payload.items:
@@ -757,15 +749,15 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
             )
             
         base_price = product.discounted_price if product.discounted_price is not None else product.original_price
-        unit_price = float(round(base_price * multiplier))
-        orig_price = float(round(product.original_price * multiplier))
+        unit_price = float(round(base_price))
+        orig_price = float(round(product.original_price))
         
         item_total = unit_price * item.quantity
         original_total += orig_price * item.quantity
         
         # Calculate discount
         if product.discounted_price is not None:
-            disc_price = float(round(product.discounted_price * multiplier))
+            disc_price = float(round(product.discounted_price))
             discount_total += (orig_price - disc_price) * item.quantity
             
         items_to_create.append(
@@ -1163,12 +1155,8 @@ async def calculate_cart_pricing(payload: dict, db: Session = Depends(get_db), c
     city = payload.get("city") or payload.get("location")
     coupon_code = payload.get("coupon_code")
     
-    # Get location pricing multiplier if city provided
+    # Standard pricing multiplier
     multiplier = 1.0
-    if city:
-        loc = db.query(LocationPricing).filter(LocationPricing.city.ilike(city)).first()
-        if loc:
-            multiplier = loc.price_multiplier
 
     subtotal = 0.0
     discount_total = 0.0
@@ -1185,8 +1173,8 @@ async def calculate_cart_pricing(payload: dict, db: Session = Depends(get_db), c
             product = db.query(Product).filter(Product.name.ilike(item["name"])).first()
             
         if product:
-            orig_price = float(round(product.original_price * multiplier))
-            disc_price = float(round(product.discounted_price * multiplier)) if product.discounted_price else orig_price
+            orig_price = float(round(product.original_price))
+            disc_price = float(round(product.discounted_price)) if product.discounted_price else orig_price
             
             unit_price = disc_price
             line_subtotal = round(unit_price * qty, 2)

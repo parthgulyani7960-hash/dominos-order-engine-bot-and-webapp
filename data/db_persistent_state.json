@@ -1,9 +1,9 @@
 {
   "version": 1.1,
-  "saved_at": "2026-09-03T17:06:52.029880+00:00",
+  "saved_at": "2026-09-03T17:12:36.509173+00:00",
   "users": [
     {
-      "id": "16b79d93-810a-40a1-89f3-8a1a708bae9c",
+      "id": "21c41d4e-8fb8-44e7-8a12-b176dfaefb8f",
       "telegram_id": "111222",
       "username": "admin",
       "display_name": "Super Admin",
@@ -17,10 +17,10 @@
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-03T17:06:50.999059"
+      "created_at": "2026-09-03T17:12:35.629186"
     },
     {
-      "id": "67b37f77-50fd-4265-9f38-62555626e087",
+      "id": "aa537338-c4c6-4b36-b656-f781e601934a",
       "telegram_id": "999000111",
       "username": "loc_user",
       "display_name": "Loc User",
@@ -34,13 +34,33 @@
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-03T17:06:51.009517"
+      "created_at": "2026-09-03T17:12:35.634662"
     }
   ],
   "saved_addresses": [
     {
       "id": "3f6d500c-0449-4472-b0b3-e0191249513b",
       "user_id": "67b37f77-50fd-4265-9f38-62555626e087",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "633459df-8873-482c-a27d-ae5d06418cb7",
+      "user_id": "5c16fdf1-3e24-4c19-b464-a7b6e6a2a20b",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "45945cf9-c526-418d-b717-cc3831932ac3",
+      "user_id": "aa537338-c4c6-4b36-b656-f781e601934a",
       "label": "Home",
       "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
       "latitude": 19.1197,
