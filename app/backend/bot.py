@@ -392,14 +392,28 @@ async def send_admin_order_details(telegram_id: str, order_id: str, db: Session,
     screenshot_disp = "—"
     if order.screenshot_url:
         screenshot_disp = "🖼️ Attached"
-    
+        
+    item_lines = []
+    for item in (order.items or []):
+        p_name = item.product.name if item.product else "Pizza Item"
+        extra_info = []
+        if getattr(item, "size", None): extra_info.append(item.size)
+        if getattr(item, "crust", None): extra_info.append(item.crust)
+        extra_str = f" ({', '.join(extra_info)})" if extra_info else ""
+        item_lines.append(f"  • <code>{item.quantity}x</code> {p_name}{extra_str} — ₹{item.price * item.quantity:.2f}")
+    items_summary = "\n".join(item_lines) if item_lines else "  • <i>No items listed</i>"
+
     detail_msg = (
-        f"🛒 <b>Order Editor: {order.id}</b>\n"
+        f"🛒 <b>Order Management Details:</b> <code>{order.id}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"• <b>Status:</b> <code>{order.status}</code>\n"
-        f"• <b>User:</b> {order.user.display_name} (ID: <code>{order.user.telegram_id}</code>)\n"
-        f"• <b>Customer Phone:</b> {customer_phone_link}\n"
+        f"• <b>Customer:</b> {order.user.display_name} (ID: <code>{order.user.telegram_id}</code>)\n"
+        f"• <b>Phone:</b> {customer_phone_link}\n"
+        f"• <b>Delivery Address:</b> <code>{order.address or 'None'}</code>\n"
+        + (f"• <b>Delivery Note:</b> <i>{order.delivery_instructions}</i>\n" if order.delivery_instructions else "")
+        + f"\n🛒 <b>Ordered Items:</b>\n{items_summary}\n\n"
         f"• <b>Total Payable:</b> ₹{order.total_payable:.2f} ({order.payment_method.upper()})\n"
+        f"• <b>Transaction UTR:</b> <code>{order.transaction_id or 'None'}</code>\n"
         f"• <b>Domino's Ref:</b> <code>{order.dominos_reference or 'None'}</code>\n"
         f"• <b>Sector Store:</b> <code>{order.sector_store or 'None'}</code>\n"
         f"• <b>Rider Name:</b> <code>{rider_name}</code>\n"
@@ -4438,6 +4452,59 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         cart_text, cart_markup = render_cart_message(db, user, session["cart"], session)
         await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
 
+    elif data == "apply_deal_4":
+        p1 = db.query(Product).filter(Product.name.like("%Paneer%")).first() or db.query(Product).first()
+        p2 = db.query(Product).filter(Product.name.like("%Capsicum%")).first() or db.query(Product).first()
+        if not p1 or not p2:
+            await answer_callback_query(callback_query_id, "Products not found in catalog!")
+            return
+        session["cart"] = {str(p1.id): 1, str(p2.id): 1}
+        session["active_deal"] = "deal_4"
+        session["deal_price"] = 105.0
+        await answer_callback_query(callback_query_id, "Deal 4 applied! ₹105")
+        cart_text, cart_markup = render_cart_message(db, user, session["cart"], session)
+        await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
+
+    elif data == "apply_deal_5a":
+        p = db.query(Product).filter(Product.name.like("%Onion%")).first() or db.query(Product).first()
+        if not p:
+            await answer_callback_query(callback_query_id, "Product database is empty!")
+            return
+        session["cart"] = {str(p.id): 3}
+        session["active_deal"] = "deal_5a"
+        session["deal_price"] = 100.0
+        await answer_callback_query(callback_query_id, "Deal 5A applied! 3x Onion Pizzas for ₹100")
+        cart_text, cart_markup = render_cart_message(db, user, session["cart"], session)
+        await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
+
+    elif data == "apply_deal_5b":
+        p = (db.query(Product).filter(Product.name.like("%Classic%")).first()
+             or db.query(Product).filter(Product.name.like("%Tomato%")).first()
+             or db.query(Product).first())
+        if not p:
+            await answer_callback_query(callback_query_id, "Product database is empty!")
+            return
+        session["cart"] = {str(p.id): 4}
+        session["active_deal"] = "deal_5b"
+        session["deal_price"] = 90.0
+        await answer_callback_query(callback_query_id, "Deal 5B applied! 4x Classic Pizzas for ₹90")
+        cart_text, cart_markup = render_cart_message(db, user, session["cart"], session)
+        await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
+
+    elif data == "apply_deal_6":
+        p = (db.query(Product).filter(Product.name.like("%Chicken Sausage%")).first()
+             or db.query(Product).filter(Product.name.like("%Chicken%")).first()
+             or db.query(Product).first())
+        if not p:
+            await answer_callback_query(callback_query_id, "Product database is empty!")
+            return
+        session["cart"] = {str(p.id): 2}
+        session["active_deal"] = "deal_6"
+        session["deal_price"] = 105.0
+        await answer_callback_query(callback_query_id, "Deal 6 applied! 2x Chicken Sausage Pizzas for ₹105")
+        cart_text, cart_markup = render_cart_message(db, user, session["cart"], session)
+        await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
+
     elif data == "support_menu":
         support_help = (
             "💬 <b>Support & Assistance Hub</b>\n"
@@ -4903,6 +4970,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "Order not found!")
             return
             
+        if order.status in ["Pending Verification", "Paid", "Order Processing", "Preparing", "Out for Delivery", "Delivered", "Completed"]:
+            await answer_callback_query(callback_query_id, "⚠️ Order already submitted & pending verification!", show_alert=True)
+            return
+
         order.status = "Pending Verification"
         order.transaction_id = f"NO-UTR-{uuid.uuid4().hex[:6].upper()}"
         db.commit()
@@ -6232,6 +6303,42 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             description=f"Deposit via UTR: {order.transaction_id or 'None'}"
         )
         db.add(tx)
+        db.commit()
+
+        # Automatically check and pay any pending orders for target_user
+        await process_auto_pay_for_user(db, target_user)
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        order_id = data.replace("admin_dep_approve_", "").strip()
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order:
+            await answer_callback_query(callback_query_id, "Deposit not found!")
+            return
+        if order.status == "Completed":
+            await answer_callback_query(callback_query_id, "Already approved!")
+            return
+            
+        target_user = order.user
+        target_user.wallet_balance += order.total_payable
+        order.status = "Completed"
+        
+        attempt = db.query(UTRAttempt).filter(UTRAttempt.order_id == order.id).first()
+        if attempt:
+            attempt.is_successful = True
+            
+        # Create WalletTransaction
+        tx = WalletTransaction(
+            user_id=target_user.id,
+            type="deposit",
+            amount=order.total_payable,
+            description=f"Deposit via UTR: {order.transaction_id or 'None'}"
+        )
+        db.add(tx)
+        db.commit()
+
+        # Automatically check and pay any pending orders for target_user
+        await process_auto_pay_for_user(db, target_user)
         
         h1 = OrderStatusHistory(order_id=order.id, status="Manual Payment Approved")
         db.add(h1)
@@ -7062,6 +7169,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "Order not found!")
             return
             
+        if order.status in ["Pending Verification", "Completed", "Approved", "Paid"]:
+            await answer_callback_query(callback_query_id, "⚠️ Deposit request already submitted & awaiting approval!", show_alert=True)
+            return
+
         order.status = "Pending Verification"
         db.commit()
         
@@ -7331,29 +7442,20 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         coupon = ""
         delivery_charge = bot_fee
         
-        if user.wallet_balance < total_payable:
-            await answer_callback_query(callback_query_id, "Insufficient Wallet Balance!")
-            await edit_bot_message(
-                user.telegram_id,
-                message_id,
-                f"❌ <b>Insufficient Wallet Balance!</b>\n\nTotal payable is <b>₹{total_payable:.2f}</b>, but you only have <b>₹{user.wallet_balance:.2f}</b>.\n\nPlease top-up in the Order App.",
-                reply_markup={
-                    "inline_keyboard": [[{"text": "🛒 Back to Cart", "callback_data": "cart_view"}]]
-                }
+        is_insufficient = user.wallet_balance < total_payable
+        initial_status = "Pending Payment" if is_insufficient else "Payment Received"
+
+        if not is_insufficient:
+            # Deduct balance
+            user.wallet_balance -= total_payable
+            # Log WalletTransaction
+            tx = WalletTransaction(
+                user_id=user.id,
+                type="payment",
+                amount=-total_payable,
+                description=f"Paid for order: {order_id}"
             )
-            session["state"] = None
-            return
-            
-        # Deduct balance
-        user.wallet_balance -= total_payable
-        # Log WalletTransaction
-        tx = WalletTransaction(
-            user_id=user.id,
-            type="payment",
-            amount=-total_payable,
-            description=f"Paid for order: {order_id}"
-        )
-        db.add(tx)
+            db.add(tx)
         
         # Find gift card
         gift_card = db.query(GiftCard).filter(GiftCard.status == "available").first()
@@ -7376,7 +7478,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             delivery_charge=delivery_charge,
             total_payable=total_payable,
             payment_method="wallet",
-            status="Payment Pending",
+            status=initial_status,
             address=address,
             phone=phone,
             coupon_applied=coupon,
@@ -7423,6 +7525,56 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 is_default=True
             )
             db.add(new_addr)
+
+        if is_insufficient:
+            h1 = OrderStatusHistory(order_id=order_id, status="Pending Payment", note="Insufficient wallet balance at checkout")
+            db.add(h1)
+            db.commit()
+            
+            missing_amount = total_payable - user.wallet_balance
+            
+            upi_id_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
+            upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
+            upi_id = upi_id_cfg.value if upi_id_cfg else "pranjalottery@fam"
+            upi_name = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
+            
+            upi_details = generate_upi_qr_details(upi_id, upi_name, missing_amount, order_id, f"Deposit for Order {order_id}")
+            upi_uri = upi_details["upi_uri"]
+            qr_url = upi_details["qr_code_url"]
+            qr_data_url = upi_details.get("qr_data_url", "")
+
+            pending_text = (
+                f"⚠️ <b>Insufficient Wallet Balance — Order Created as Pending!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Your order <code>{order_id}</code> is created in ⏳ <b>PENDING PAYMENT</b> status.\n\n"
+                f"• <b>Total Payable:</b> ₹{total_payable:.2f}\n"
+                f"• <b>Current Wallet:</b> ₹{user.wallet_balance:.2f}\n"
+                f"• <b>Deposit Required:</b> <b>₹{missing_amount:.2f}</b>\n\n"
+                f"👉 <a href=\"{upi_uri}\"><b>📱 Click Here to Deposit ₹{missing_amount:.2f} via UPI App</b></a> or scan the QR code above.\n\n"
+                f"After sending payment, tap <b>✅ I Have Paid</b> below. Once approved by admin, your pending order will be paid automatically! 🍕"
+            )
+            pending_markup = {
+                "inline_keyboard": [
+                    [{"text": "✅ I Have Paid", "callback_data": f"wallet_marked_paid_{order_id}"}],
+                    [{"text": "❌ Cancel Order", "callback_data": f"cancel_order_{order_id}"}]
+                ]
+            }
+            
+            if qr_data_url and qr_data_url.startswith("data:image/png;base64,"):
+                import base64 as _b64
+                qr_bytes = _b64.b64decode(qr_data_url.split(",", 1)[1])
+                await send_bot_photo_bytes(user.telegram_id, qr_bytes, "upi_qr.png", pending_text, reply_markup=pending_markup)
+            else:
+                await send_bot_photo(user.telegram_id, qr_url, pending_text, reply_markup=pending_markup)
+                
+            session["cart"] = {}
+            session["state"] = None
+            session["placing_order"] = False
+            session["temp_address"] = None
+            session["temp_phone"] = None
+            session["order_note"] = ""
+            await answer_callback_query(callback_query_id)
+            return
 
         h1 = OrderStatusHistory(order_id=order_id, status="Payment Received")
         db.add(h1)

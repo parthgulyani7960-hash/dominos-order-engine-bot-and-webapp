@@ -1529,19 +1529,16 @@ def get_all_orders(db: Session = Depends(get_db), admin: User = Depends(get_curr
         ~User.telegram_id.like("9999%"),
         ~Order.id.like("TOPUP-%")
     ).order_by(Order.created_at.desc()).all()
+    from .services.order_processor import serialize_order
     result = []
     for o in orders:
         customer = db.query(User).filter(User.id == o.user_id).first()
-        result.append({
-            "id": o.id,
-            "customer_name": customer.display_name if customer else "Unknown",
-            "customer_id": o.user_id,
-            "total": o.total_payable,
-            "status": o.status,
-            "payment_method": o.payment_method,
-            "created_at": o.created_at.isoformat(),
-            "estimated_delivery": o.estimated_delivery.isoformat() if o.estimated_delivery else None
-        })
+        data = serialize_order(o)
+        data["customer_name"] = customer.display_name if customer else "Unknown"
+        data["customer_id"] = o.user_id
+        data["customer_phone"] = o.phone
+        data["customer_telegram_id"] = customer.telegram_id if customer else None
+        result.append(data)
     return result
 
 @router.get("/admin/dashboard")
@@ -4785,6 +4782,9 @@ async def verify_payment(order_id: str, payload: PaymentVerifyRequest, request: 
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.status in ["Pending Verification", "Paid", "Order Processing", "Preparing", "Out for Delivery", "Delivered", "Completed"]:
+        raise HTTPException(status_code=400, detail="This order is already marked as paid or submitted for verification.")
         
     # Check if order is too old (timeout: 20 minutes)
     import datetime
