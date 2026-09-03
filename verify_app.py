@@ -1253,7 +1253,7 @@ class TestPizzaPlatform(unittest.TestCase):
             self.assertIn("admin_approve_direct_order_", admin_markup["inline_keyboard"][0][0]["callback_data"])
 
     def test_22_location_separation_and_address_preservation(self):
-        """Verifies location separation: GPS coordinates, written doorstep address, and city updating."""
+        """Verifies location separation: GPS coordinates, written doorstep address, and phone updating."""
         import asyncio
         from unittest.mock import patch, AsyncMock
         from app.backend.bot import (
@@ -1262,30 +1262,29 @@ class TestPizzaPlatform(unittest.TestCase):
 
         test_user = self.db.query(User).filter(User.telegram_id == "999000111").first()
         if not test_user:
-            test_user = User(telegram_id="999000111", username="loc_user", display_name="Location User", city="Mumbai")
+            test_user = User(telegram_id="999000111", username="loc_user", display_name="Location User")
             self.db.add(test_user)
             self.db.commit()
 
-        # 1. Test display_delivery_location_menu renders 4 distinct sections & Change City button
+        # 1. Test display_delivery_location_menu renders 3 distinct sections & location buttons
         with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send:
             asyncio.run(display_delivery_location_menu(self.db, test_user))
             mock_send.assert_called_once()
             msg = mock_send.call_args[0][1]
             markup = mock_send.call_args[1]["reply_markup"]
-            self.assertIn("Delivery City:", msg)
             self.assertIn("GPS Location:", msg)
             self.assertIn("Doorstep Address:", msg)
             self.assertIn("Phone Number:", msg)
+            self.assertNotIn("Delivery City:", msg)
             
             keyboard_texts = [btn["text"] for row in markup["keyboard"] for btn in row]
             self.assertIn("📍 Share My GPS Location", keyboard_texts)
             self.assertIn("🏠 Update Delivery Address", keyboard_texts)
-            self.assertIn("🏙️ Change City / Area", keyboard_texts)
+            self.assertNotIn("🏙️ Change City / Area", keyboard_texts)
 
-        # 2. Test manual doorstep address entry (preserves existing coords/city)
+        # 2. Test manual doorstep address entry (preserves existing coords)
         test_user.latitude = 19.0760
         test_user.longitude = 72.8777
-        test_user.city = "Mumbai"
         self.db.commit()
 
         with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send:
@@ -1305,7 +1304,6 @@ class TestPizzaPlatform(unittest.TestCase):
             # Verify coordinates were preserved
             self.assertEqual(test_user.latitude, 19.0760)
             self.assertEqual(test_user.longitude, 72.8777)
-            self.assertEqual(test_user.city, "Mumbai")
 
         # 3. Test sharing GPS location preserves written doorstep address (does not overwrite with "GPS Location")
         with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \

@@ -1052,12 +1052,10 @@ async def display_delivery_location_menu(db: Session, user: User):
     session = USER_BOT_SESSION.setdefault(user.telegram_id, {"cart": {}, "state": None})
     session["state"] = "in_location_menu"
     
-    city_disp = f"<b>{user.city}</b>" if user.city else "<i>Not set</i>"
-    
     if user.latitude is not None and user.longitude is not None:
-        coord_line = f"\n📡 <b>GPS Location:</b> <code>{user.latitude:.5f}, {user.longitude:.5f}</code>"
+        coord_line = f"📡 <b>GPS Location:</b> <code>{user.latitude:.5f}, {user.longitude:.5f}</code>"
     else:
-        coord_line = f"\n📡 <b>GPS Location:</b> <i>⚠️ No GPS coordinates saved</i>"
+        coord_line = f"📡 <b>GPS Location:</b> <i>⚠️ No GPS coordinates saved</i>"
         
     saved_addr = db.query(SavedAddress).filter(SavedAddress.user_id == user.id).first()
     if saved_addr and saved_addr.full_address and saved_addr.full_address != "GPS Location":
@@ -1075,11 +1073,10 @@ async def display_delivery_location_menu(db: Session, user: User):
     loc_msg = (
         f"📍 <b>Delivery Location & Details</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🏙️ <b>Delivery City:</b> {city_disp}"
         f"{coord_line}"
         f"{addr_line}"
         f"{phone_line}\n\n"
-        "<i>Note: Your GPS coordinates, written doorstep address, and city region are stored separately for accurate Domino's delivery.</i>\n\n"
+        "<i>Note: Your GPS coordinates, written doorstep address, and contact details are stored for accurate Domino's delivery.</i>\n\n"
         "Choose an option below to update any setting:"
     )
     
@@ -1087,7 +1084,6 @@ async def display_delivery_location_menu(db: Session, user: User):
         "keyboard": [
             [{"text": "📍 Share My GPS Location", "request_location": True}],
             [{"text": "🏠 Update Delivery Address"}],
-            [{"text": "🏙️ Change City / Area"}],
             [{"text": "📱 Update Phone Number"}],
             [{"text": "🔙 Back"}]
         ],
@@ -1142,12 +1138,10 @@ async def display_pizza_menu(db: Session, user: User, reply_markup: dict, page: 
     }
     cat_label = category_emoji.get(category.lower(), f"🍽️ {category}")
 
-    city_display = f"📍 <b>{user.city}</b>" if user.city else "📍 <b>India</b>"
-    
     menu_lines = [
         f"🍕 <b>DOMINO'S PIZZA MENU</b>",
         f"━━━━━━━━━━━━━━━━━━━━━━",
-        f"{city_display}  ·  Category: <b>{cat_label}</b>",
+        f"Category: <b>{cat_label}</b>",
         f"📄 Page <b>{page}/{total_pages}</b> ({len(products)} items available)",
         "━━━━━━━━━━━━━━━━━━━━━━\n"
     ]
@@ -1441,7 +1435,6 @@ def render_order_confirmation_screen(db: Session, user: User, session: dict) -> 
         "📋 <b>Review Your Order</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"🛒 <b>Items:</b>\n{items_text}\n\n"
-        f"📍 <b>City:</b> {user.city or '—'}\n"
         f"🏠 <b>Delivery Address:</b> {address}\n"
         f"📱 <b>Phone:</b> {phone}"
         f"{note_line}\n\n"
@@ -1522,7 +1515,7 @@ async def initiate_checkout(db: Session, user: User, session: dict, edit_message
         and len(saved_address.strip()) > 3
     )
 
-    if (city and city != "Not Shared" or has_coords):
+    if (has_coords or has_doorstep_address or saved_phone):
         if has_doorstep_address and saved_phone and has_coords and not session.get("force_address_entry"):
             # AUTO-SKIP: If we already have their location, address, and phone, go straight to order confirmation!
             session["temp_address"] = saved_address
@@ -1535,14 +1528,13 @@ async def initiate_checkout(db: Session, user: User, session: dict, edit_message
                 await send_bot_message(user.telegram_id, prompt, reply_markup=confirm_markup)
             return
 
-        # City known but missing details or coordinates — show status of 3 fields
+        # Show status of 3 fields
         addr_line  = f"\n✅ <b>Saved Address:</b> <code>{saved_address}</code>" if has_doorstep_address else "\n⚠️ <b>Saved Address:</b> <i>Missing / Required</i>"
         phone_line = f"\n✅ <b>Phone:</b> <code>{saved_phone}</code>" if saved_phone else "\n⚠️ <b>Phone:</b> <i>Missing / Required</i>"
         coords_line = f"\n✅ <b>GPS Coordinates:</b> <code>{user.latitude:.5f}, {user.longitude:.5f}</code>" if has_coords else "\n⚠️ <b>GPS Coordinates:</b> <i>Missing / Required</i>"
         
         prompt = (
             "📍 <b>Delivery Details Required</b>\n\n"
-            f"Your delivery city is: <b>{city}</b>\n"
             f"{addr_line}"
             f"{phone_line}"
             f"{coords_line}\n\n"
@@ -2215,26 +2207,13 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 await notify_admins(db, admin_text, reply_markup=action_markup)
             return
 
-    if text_clean in ("🏙️ Change City / Area", "change city"):
-        session["state"] = "waiting_for_city"
-        await send_bot_message(
-            user.telegram_id,
-            "🏙️ <b>Change Delivery City / Area</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"Current city: <b>{user.city or 'Not set'}</b>\n\n"
-            "Please type your new city or area name (e.g. <code>Mumbai</code>, <code>Delhi</code>, <code>Bangalore</code>):\n\n"
-            "<i>Store pricing and menu selection will update automatically for your selected city.</i>",
-            reply_markup={"keyboard": [[{"text": "📍 Share My GPS Location", "request_location": True}], [{"text": "❌ Cancel"}]], "resize_keyboard": True, "one_time_keyboard": True}
-        )
-        return
-
     if text_clean in ("🏠 Update Delivery Address", "update delivery address"):
         session["state"] = "waiting_for_address_update"
-        city_line = f"📍 <b>City:</b> {user.city}\n" if user.city else ""
         await send_bot_message(
             user.telegram_id,
-            f"🏠 <b>Update Doorstep Delivery Address</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n{city_line}"
+            "🏠 <b>Update Doorstep Delivery Address</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "Please type your full doorstep delivery address below (e.g. <code>Flat 402, Sunshine Apartments, MG Road</code>):\n\n"
-            "<i>Note: Your GPS coordinates and city pricing remain saved separately.</i>",
+            "<i>Note: Your GPS coordinates remain saved separately.</i>",
             reply_markup={"keyboard": [[{"text": "❌ Cancel"}]], "resize_keyboard": True, "one_time_keyboard": True}
         )
         return
@@ -2249,80 +2228,6 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             reply_markup={"keyboard": [[{"text": "❌ Cancel"}]], "resize_keyboard": True, "one_time_keyboard": True}
         )
         return
-
-    if session.get("state") == "waiting_for_city":
-        city_buttons = [
-            "❌ skip location", "🍕 view menu", "💰 my wallet", "📦 track orders",
-            "📍 change location", "❌ cancel", "🏠 update delivery address", "📱 update phone number", "🏙️ change city / area", "🔙 back"
-        ]
-        if text and text.strip().lower() in city_buttons:
-            pass  # Fall through to main button routing
-        elif text and text.strip():
-            city_input = text.strip().title()
-            
-            # Geocode the typed city/area to resolve coordinates
-            try:
-                from .routes import geocode_address
-                lat, lon = await geocode_address(city_input)
-                if lat is not None and lon is not None:
-                    user.city = city_input
-                    user.latitude = lat
-                    user.longitude = lon
-                    db.commit()
-                    
-                    saved_addr = db.query(SavedAddress).filter(SavedAddress.user_id == user.id).first()
-                    if not saved_addr:
-                        saved_addr = SavedAddress(user_id=user.id, label="Home", is_default=True)
-                        db.add(saved_addr)
-                    # Note: We keep the full_address if it is already a doorstep address,
-                    # but if it was missing or GPS Location, we set it to city_input.
-                    if not saved_addr.full_address or saved_addr.full_address == "GPS Location":
-                        saved_addr.full_address = city_input
-                    saved_addr.latitude = lat
-                    saved_addr.longitude = lon
-                    saved_addr.city = city_input
-                    db.commit()
-                    session["state"] = None
-                    session["force_address_entry"] = True
-                else:
-                    await send_bot_message(
-                        user.telegram_id,
-                        f"⚠️ <b>City/Area Resolution Failed:</b>\n\n"
-                        f"We could not resolve coordinates for '{city_input}'. Please enter a more specific city/area name or share your GPS location using the button below.",
-                        reply_markup={
-                            "keyboard": [
-                                [{"text": "📍 Share My GPS Location", "request_location": True}],
-                                [{"text": "❌ Cancel"}]
-                            ],
-                            "resize_keyboard": True,
-                            "one_time_keyboard": True
-                        }
-                    )
-                    return
-            except Exception as e:
-                logger.error(f"Error resolving coordinates for city '{city_input}': {e}")
-                await send_bot_message(user.telegram_id, "⚠️ Error resolving location. Please try again or share your GPS location.")
-                return
-            
-            try:
-                from .services.dominos_service import sync_realtime_menu, sync_realtime_menu_bg
-                if db.query(Product).count() > 5:
-                    asyncio.create_task(sync_realtime_menu_bg(city_input))
-                else:
-                    await sync_realtime_menu(city_input, db)
-            except Exception as e:
-                logger.error(f"Error syncing menu for typed city '{city_input}': {e}")
-            
-            if session.get("checkout_pending"):
-                session["checkout_pending"] = False
-                await initiate_checkout(db, user, session)
-            else:
-                await send_bot_message(
-                    user.telegram_id,
-                    f"✅ <b>City updated to: {city_input}</b>\n\nMenu prices and store settings have been updated for your city!"
-                )
-                await display_delivery_location_menu(db, user)
-            return
 
     if session.get("state") == "waiting_for_phone_update":
         phone_raw = text.strip().replace(" ", "").replace("-", "") if text else ""
@@ -4500,10 +4405,7 @@ def render_cart_message(db: Session, user: User, cart: dict, session: dict = Non
     ]
     inline_keyboard.append(action_row)
     
-    if user.wallet_balance >= total_payable:
-        inline_keyboard.append([{"text": "🛍️ Checkout & Place Order", "callback_data": "cart_checkout"}])
-    else:
-        inline_keyboard.append([{"text": "⚠️ Insufficient Wallet Balance", "callback_data": "wallet_view"}])
+    inline_keyboard.append([{"text": "🛍️ Proceed to Checkout", "callback_data": "cart_checkout"}])
         
     return "\n".join(lines), {"inline_keyboard": inline_keyboard}
 
@@ -4959,9 +4861,8 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         else:
             # Have city but no saved address — ask for address
             session["state"] = "waiting_for_address"
-            city_line = f"\U0001f4cd <b>City: {user.city}</b>\n\n" if user.city else ""
             prompt = (
-                f"🏡 <b>Delivery Checkout:</b>\n\n{city_line}"
+                "🏡 <b>Delivery Checkout:</b>\n\n"
                 "Please type your <b>full delivery address</b> in this chat and press enter."
             )
             # Send clean keyboard containing only Cancel option
@@ -4984,7 +4885,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
 
     elif data == "checkout_change_location":
         session["checkout_pending"] = True
-        session["state"] = "waiting_for_city"
+        session["state"] = "waiting_for_location"
         session["force_address_entry"] = True
         loc_keyboard = {
             "keyboard": [
@@ -4994,11 +4895,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             "resize_keyboard": True,
             "one_time_keyboard": True
         }
-        current_city = f"Current city: <b>{user.city}</b>\n\n" if user.city else ""
         await send_bot_message(
             user.telegram_id,
-            f"📍 <b>Change Delivery Location</b>\n\n{current_city}"
-            "Tap the <b>📍 Share Current Location</b> button below or type your <b>City / Area Name</b> in this chat to update location.",
+            "📍 <b>Share Delivery Location</b>\n\n"
+            "Tap the <b>📍 Share Current Location</b> button below on your keyboard to share your GPS location.",
             reply_markup=loc_keyboard
         )
         await answer_callback_query(callback_query_id)
@@ -5037,9 +4937,8 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         session["state"] = "waiting_for_address"
         session["temp_address"] = None
         session["temp_phone"]   = None
-        city_line = f"\U0001f4cd <b>City:</b> {user.city}\n\n" if user.city else ""
         prompt = (
-            f"🏡 <b>Delivery Checkout:</b>\n\n{city_line}"
+            "🏡 <b>Delivery Checkout:</b>\n\n"
             "Please type your <b>full delivery address</b> in this chat and press enter."
         )
         address_keyboard = {
@@ -5099,60 +4998,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             return
             
         session["state"] = "waiting_for_confirm"
-        
-        multiplier = 1.0
-        delivery_charge = 30.0
-
-        cart = session.get("cart", {})
-        active_deal = session.get("active_deal")
-        if active_deal:
-            subtotal = session.get("deal_price", 0.0)
-        else:
-            subtotal = 0.0
-            for product_id_str, qty in cart.items():
-                product_id = product_id_str  # Product.id is a UUID string
-                p = db.query(Product).filter(Product.id == product_id).first()
-                if p:
-                    price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
-                    subtotal += (price * qty)
-                
-        bot_fee = get_bot_fee(db)
-        total_payable = subtotal + bot_fee
-        
-        item_lines = []
-        for product_id_str, qty in list(cart.items()):
-            p = db.query(Product).filter(Product.id == product_id_str).first()
-            if p:
-                price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
-                if active_deal:
-                    item_lines.append(f"  • {p.name} x{qty}")
-                else:
-                    item_lines.append(f"  • {p.name} x{qty} — ₹{price * qty:.0f}")
-        items_text = "\n".join(item_lines) if item_lines else "  • (items unavailable)"
-
-        confirm_text = (
-            f"📋 <b>Please Confirm Your Order</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🛒 <b>Items:</b>\n{items_text}\n\n"
-            f"🏡 <b>Delivery Address:</b> {address}\n"
-            f"📱 <b>Phone Number:</b> {phone}\n\n"
-            f"💰 <b>Price Breakdown:</b>\n"
-            f"  Pizza Total:     ₹{subtotal:.2f}\n"
-            f"  Bot Service Fee: +₹{bot_fee:.2f}\n"
-            f"  ─────────────────\n"
-            f"  <b>Total Payable: ₹{total_payable:.2f}</b>\n\n"
-            f"💡 <i>Wallet Balance: ₹{user.wallet_balance:.2f}</i>\n\n"
-            f"Click the confirmation button below to finalize your order."
-        )
-        
-        confirm_markup = {
-            "inline_keyboard": [
-                [
-                    {"text": "✅ Place Order", "callback_data": "order_confirm_place"},
-                    {"text": "❌ Cancel Order", "callback_data": "cart_view"}
-                ]
-            ]
-        }
+        confirm_text, confirm_markup = render_order_confirmation_screen(db, user, session)
         await edit_bot_message(user.telegram_id, message_id, confirm_text, reply_markup=confirm_markup)
         await answer_callback_query(callback_query_id)
         
