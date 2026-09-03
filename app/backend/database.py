@@ -573,10 +573,10 @@ PERSISTENT_BACKUP_PATH = os.path.join(DATA_DIR, "db_persistent_state.json")
 PERSISTENT_FILE_ID_PATH = os.path.join(DATA_DIR, "latest_snapshot_file_id.txt")
 
 def upload_snapshot_to_telegram_cloud(file_path: str) -> bool:
-    """Saves persistent database snapshot quietly without spamming raw JSON files into personal Telegram chats."""
-    backup_chat = os.getenv("SNAPSHOT_CHANNEL_ID", "").strip()
+    """Saves persistent database snapshot quietly and pins it to Telegram Cloud Storage for guaranteed restore on container redeploys."""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    if not backup_chat or not bot_token or not os.path.exists(file_path):
+    backup_chat = os.getenv("SNAPSHOT_CHANNEL_ID", "").strip() or os.getenv("ADMIN_TELEGRAM_ID", "7958236048").strip()
+    if not bot_token or not backup_chat or not os.path.exists(file_path):
         return True
     try:
         import urllib.request, uuid
@@ -613,7 +613,18 @@ def upload_snapshot_to_telegram_cloud(file_path: str) -> bool:
                             file_id_out.write(file_id)
                     except Exception:
                         pass
-                logger.info("[PERSISTENCE] Successfully backed up DB snapshot quietly!")
+                
+                # Pin the snapshot document in Telegram chat so getChat can ALWAYS retrieve it on fresh boots
+                if msg_id and backup_chat:
+                    try:
+                        pin_url = f"https://api.telegram.org/bot{bot_token}/pinChatMessage"
+                        pin_body = json.dumps({"chat_id": backup_chat, "message_id": msg_id, "disable_notification": True}).encode("utf-8")
+                        pin_req = urllib.request.Request(pin_url, data=pin_body, headers={"Content-Type": "application/json"}, method="POST")
+                        urllib.request.urlopen(pin_req, timeout=5)
+                    except Exception as pe:
+                        logger.warning(f"[PERSISTENCE] pinChatMessage failed: {pe}")
+
+                logger.info("[PERSISTENCE] Successfully backed up DB snapshot quietly & pinned in Telegram Cloud Storage!")
                 return True
     except Exception as e:
         logger.warning(f"[PERSISTENCE] Silent cloud backup failed: {e}")
@@ -623,14 +634,14 @@ def upload_snapshot_to_telegram_cloud(file_path: str) -> bool:
 def download_snapshot_from_telegram_cloud() -> dict | None:
     """Downloads the most recent persistent JSON snapshot from Telegram Cloud Storage."""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    admin_id = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
+    admin_id = os.getenv("SNAPSHOT_CHANNEL_ID", "").strip() or os.getenv("ADMIN_TELEGRAM_ID", "7958236048").strip()
     if not bot_token:
         return None
     try:
         import urllib.request
         target_file_id = None
 
-        # 1. Try reading pinned message from Admin Chat
+        # 1. Try reading pinned message from Admin / Backup Chat
         if admin_id:
             try:
                 chat_url = f"https://api.telegram.org/bot{bot_token}/getChat?chat_id={admin_id}"
@@ -674,6 +685,7 @@ def download_snapshot_from_telegram_cloud() -> dict | None:
                 pass
 
         if not target_file_id:
+            logger.warning("[PERSISTENCE] No pinned snapshot found on Telegram Cloud.")
             return None
 
         # Resolve Telegram file_path using file_id

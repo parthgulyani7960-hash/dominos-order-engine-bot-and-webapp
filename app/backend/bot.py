@@ -427,7 +427,7 @@ async def send_admin_order_details(telegram_id: str, order_id: str, db: Session,
     if lat and lon:
         maps_url = f"https://www.google.com/maps?q={lat},{lon}"
     else:
-        clean_addr = urllib.parse.quote(order.delivery_address or "India")
+        clean_addr = urllib.parse.quote(order.address or (order.user.address if order.user else "India"))
         maps_url = f"https://www.google.com/maps/search/?api=1&query={clean_addr}"
 
     buttons = [
@@ -6257,11 +6257,12 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         order_id = data.replace("admin_change_status_menu_", "").strip()
         
         msg = f"🔄 <b>Change Status for Order: {order_id}</b>\n\nSelect the new status below:"
-        statuses = ["Accepted", "Order Processing", "Placed", "Preparing", "Out for Delivery", "Delivered", "Completed", "Cancelled"]
+        statuses = ["Accepted", "Order Processing", "Placed", "Preparing", "Out for Delivery", "Delivered", "Completed", "Out of Stock (Cancel & Refund)", "Cancelled"]
         buttons = []
         row = []
         for s in statuses:
-            row.append({"text": s, "callback_data": f"admin_set_status_{order_id}_{s}"})
+            cb_val = "admin_set_status_" + order_id + "_" + ("out_of_stock" if s.startswith("Out of Stock") else s)
+            row.append({"text": s, "callback_data": cb_val})
             if len(row) == 2:
                 buttons.append(row)
                 row = []
@@ -6279,7 +6280,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             return
         parts = data.replace("admin_set_status_", "").split("_")
         order_id = parts[0].strip()
-        new_status = "_".join(parts[1:]).strip()
+        status_key = "_".join(parts[1:]).strip()
+        
+        is_out_of_stock = (status_key == "out_of_stock")
+        new_status = "Cancelled" if is_out_of_stock else status_key
         
         order = db.query(Order).filter(Order.id == order_id).first()
         if not order:
@@ -6295,29 +6299,35 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 
         old_status = order.status
         order.status = new_status
+        note_str = "Cancelled by admin: Items Out of Stock" if is_out_of_stock else f"Status set manually by admin: {user.username or 'admin'}"
         h = OrderStatusHistory(
             order_id=order.id,
             status=new_status,
-            note=f"Status set manually by admin: {user.username or 'admin'}"
+            note=note_str
         )
         db.add(h)
         
         # Process refund if transitioning to Cancelled or Refunded
-        if new_status in ("Cancelled", "Refunded") and old_status not in ("Cancelled", "Refunded"):
+        if (new_status in ("Cancelled", "Refunded") or is_out_of_stock) and old_status not in ("Cancelled", "Refunded"):
             customer = db.query(User).filter(User.id == order.user_id).first()
             if customer and order.payment_method in ("wallet", "upi"):
                 customer.wallet_balance += order.total_payable
+                desc_str = f"Wallet Refund for Out of Stock order #{order.id[:8]}" if is_out_of_stock else f"Refund for {new_status.lower()} order #{order.id[:8]}"
                 refund_tx = WalletTransaction(
                     user_id=customer.id,
                     type="refund",
                     amount=order.total_payable,
-                    description=f"Refund for {new_status.lower()} order #{order.id[:8]}"
+                    description=desc_str
                 )
                 db.add(refund_tx)
         
         db.commit()
         
-        await answer_callback_query(callback_query_id, f"Status updated to {new_status}!")
+        # Save persistence snapshot
+        auto_save_persistent_db_state(db)
+        
+        disp_status = "Out of Stock (Cancelled & Refunded)" if is_out_of_stock else new_status
+        await answer_callback_query(callback_query_id, f"Status updated to {disp_status}!")
         
         # Notify the user via the bot
         try:
