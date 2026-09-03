@@ -570,6 +570,142 @@ class WithdrawalRequest(TimestampMixin, Base):
 # ---------------------------------------------------------------------------
 
 PERSISTENT_BACKUP_PATH = os.path.join(DATA_DIR, "db_persistent_state.json")
+PERSISTENT_FILE_ID_PATH = os.path.join(DATA_DIR, "latest_snapshot_file_id.txt")
+
+def upload_snapshot_to_telegram_cloud(file_path: str) -> bool:
+    """Uploads persistent snapshot to Telegram Cloud Storage as automated off-instance backup."""
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    admin_id = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
+    if not bot_token or not admin_id or not os.path.exists(file_path):
+        return False
+    try:
+        import urllib.request, uuid
+        boundary = f"----WebKitFormBoundary{uuid.uuid4().hex}"
+        url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+        
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+
+        body = []
+        body.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{admin_id}\r\n".encode("utf-8"))
+        body.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n[AUTO_DB_SNAPSHOT_v1.1]\r\n".encode("utf-8"))
+        body.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"disable_notification\"\r\n\r\ntrue\r\n".encode("utf-8"))
+        filename = os.path.basename(file_path)
+        body.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{filename}\"\r\nContent-Type: application/json\r\n\r\n".encode("utf-8"))
+        body.append(file_bytes)
+        body.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+        
+        full_body = b"".join(body)
+        req = urllib.request.Request(
+            url,
+            data=full_body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            res_data = json.loads(resp.read().decode("utf-8"))
+            if res_data.get("ok"):
+                msg_id = res_data.get("result", {}).get("message_id")
+                file_id = res_data.get("result", {}).get("document", {}).get("file_id")
+                if file_id:
+                    try:
+                        with open(PERSISTENT_FILE_ID_PATH, "w", encoding="utf-8") as file_id_out:
+                            file_id_out.write(file_id)
+                    except Exception:
+                        pass
+                
+                # Pin message to ensure permanent chat lookup
+                if msg_id:
+                    try:
+                        pin_url = f"https://api.telegram.org/bot{bot_token}/pinChatMessage?chat_id={admin_id}&message_id={msg_id}&disable_notification=true"
+                        urllib.request.urlopen(urllib.request.Request(pin_url, method="POST"), timeout=5)
+                    except Exception:
+                        pass
+                        
+                logger.info("[PERSISTENCE] Successfully backed up DB snapshot to Telegram Cloud Storage!")
+                return True
+    except Exception as e:
+        logger.warning(f"[PERSISTENCE] Telegram Cloud backup upload failed: {e}")
+    return False
+
+
+def download_snapshot_from_telegram_cloud() -> dict | None:
+    """Downloads the most recent persistent JSON snapshot from Telegram Cloud Storage."""
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    admin_id = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
+    if not bot_token:
+        return None
+    try:
+        import urllib.request
+        target_file_id = None
+
+        # 1. Try reading pinned message from Admin Chat
+        if admin_id:
+            try:
+                chat_url = f"https://api.telegram.org/bot{bot_token}/getChat?chat_id={admin_id}"
+                req = urllib.request.Request(chat_url, method="GET")
+                with urllib.request.urlopen(req, timeout=8) as chat_resp:
+                    chat_data = json.loads(chat_resp.read().decode("utf-8"))
+                    if chat_data.get("ok"):
+                        pinned = chat_data.get("result", {}).get("pinned_message", {})
+                        doc = pinned.get("document")
+                        caption = pinned.get("caption", "")
+                        if doc and "[AUTO_DB_SNAPSHOT" in caption:
+                            target_file_id = doc.get("file_id")
+            except Exception as e:
+                logger.warning(f"[PERSISTENCE] Failed getChat pinned_message lookup: {e}")
+
+        # 2. Try saved local file_id fallback if pinned_message look up didn't yield file_id
+        if not target_file_id and os.path.exists(PERSISTENT_FILE_ID_PATH):
+            try:
+                with open(PERSISTENT_FILE_ID_PATH, "r", encoding="utf-8") as f:
+                    target_file_id = f.read().strip()
+            except Exception:
+                pass
+
+        # 3. Fallback to getUpdates
+        if not target_file_id:
+            try:
+                updates_url = f"https://api.telegram.org/bot{bot_token}/getUpdates?allowed_updates=[\"message\"]&limit=100"
+                req = urllib.request.Request(updates_url, method="GET")
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    res_data = json.loads(resp.read().decode("utf-8"))
+                    if res_data.get("ok"):
+                        updates = res_data.get("result", [])
+                        for up in reversed(updates):
+                            msg = up.get("message", {})
+                            caption = msg.get("caption", "")
+                            doc = msg.get("document")
+                            if doc and "[AUTO_DB_SNAPSHOT" in caption:
+                                target_file_id = doc.get("file_id")
+                                break
+            except Exception:
+                pass
+
+        if not target_file_id:
+            return None
+
+        # Resolve Telegram file_path using file_id
+        file_url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={target_file_id}"
+        with urllib.request.urlopen(urllib.request.Request(file_url, method="GET"), timeout=8) as file_resp:
+            file_info = json.loads(file_resp.read().decode("utf-8"))
+            if not file_info.get("ok"):
+                return None
+            file_path = file_info.get("result", {}).get("file_path")
+            if not file_path:
+                return None
+
+        # Download content from Telegram CDN
+        dl_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+        with urllib.request.urlopen(urllib.request.Request(dl_url, method="GET"), timeout=10) as dl_resp:
+            content_str = dl_resp.read().decode("utf-8")
+            snapshot_data = json.loads(content_str)
+            logger.info(f"[PERSISTENCE] Downloaded latest DB snapshot from Telegram Cloud Storage (saved_at: {snapshot_data.get('saved_at')})!")
+            return snapshot_data
+    except Exception as e:
+        logger.warning(f"[PERSISTENCE] Telegram Cloud backup download failed: {e}")
+    return None
+
 
 def auto_save_persistent_db_state(db=None) -> bool:
     """Saves non-volatile user balances, addresses, orders, wallet transactions, and coupons to a persistent JSON snapshot."""
@@ -666,6 +802,9 @@ def auto_save_persistent_db_state(db=None) -> bool:
 
         with open(PERSISTENT_BACKUP_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
+            
+        # Also upload off-instance snapshot to Telegram Cloud
+        upload_snapshot_to_telegram_cloud(PERSISTENT_BACKUP_PATH)
         return True
     except Exception as e:
         logger.error(f"[PERSISTENCE] Failed to save DB snapshot: {e}")
@@ -677,11 +816,17 @@ def auto_save_persistent_db_state(db=None) -> bool:
 
 def auto_restore_persistent_db_state(db) -> bool:
     """Restores user accounts, wallet balances, saved addresses, orders, transactions, and coupons if the database file was reset or replaced on deployment."""
-    if not os.path.exists(PERSISTENT_BACKUP_PATH):
+    data = download_snapshot_from_telegram_cloud()
+    if not data and os.path.exists(PERSISTENT_BACKUP_PATH):
+        try:
+            with open(PERSISTENT_BACKUP_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            logger.error(f"[PERSISTENCE] Error reading local backup file: {e}")
+            
+    if not data:
         return False
     try:
-        with open(PERSISTENT_BACKUP_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
 
         restored_users = 0
         for u_data in data.get("users", []):
