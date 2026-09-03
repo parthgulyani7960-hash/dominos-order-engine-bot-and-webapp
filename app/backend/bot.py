@@ -5095,24 +5095,37 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         txs = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).all()
         for t in txs:
             _ist = (t.created_at + datetime.timedelta(hours=5, minutes=30)) if t.created_at else datetime.datetime.now()
+            t_type = (t.type or "tx").lower()
+            is_deduction = t_type in ("payment", "debit", "withdrawal", "order", "purchase", "deduction")
+            
+            sign = "-" if is_deduction else "+"
+            icon = "🔴" if is_deduction else "🟢"
+            disp_type = "ORDER PAYMENT" if is_deduction else t.type.upper()
+            
             all_records.append({
                 "id": f"TXN-{t.id[:8].upper()}",
-                "type": t.type.upper(),
-                "amount": t.amount,
+                "type": disp_type,
+                "amount": abs(t.amount or 0.0),
+                "sign": sign,
+                "icon": icon,
                 "description": t.description or "Wallet Transaction",
                 "date": _ist,
                 "date_str": _ist.strftime("%d %b %Y, %I:%M %p IST")
             })
 
-        topup_orders = db.query(Order).filter(Order.user_id == user.id, Order.id.like("TOPUP-%"), Order.status.in_(["Completed", "Paid", "Approved"])).all()
+        topup_orders = db.query(Order).filter(Order.user_id == user.id, Order.id.like("TOPUP-%")).all()
         for o in topup_orders:
-            if not any(r["id"] == f"TXN-{o.id[:8].upper()}" for r in all_records):
+            ref_id_str = f"TXN-{o.id[:8].upper()}"
+            if not any(r["id"] == ref_id_str or r["id"] == o.id for r in all_records):
                 _ist = (o.created_at + datetime.timedelta(hours=5, minutes=30)) if o.created_at else datetime.datetime.now()
+                is_comp = o.status in ("Completed", "Paid", "Approved")
                 all_records.append({
                     "id": o.id,
                     "type": "DEPOSIT",
-                    "amount": o.total_payable,
-                    "description": f"UPI Deposit (UTR: {o.transaction_id or 'Verified'})",
+                    "amount": abs(o.total_payable or 0.0),
+                    "sign": "+" if is_comp else "",
+                    "icon": "🟢" if is_comp else "🟡",
+                    "description": f"UPI Deposit ({'Approved' if is_comp else 'Pending Verification'})",
                     "date": _ist,
                     "date_str": _ist.strftime("%d %b %Y, %I:%M %p IST")
                 })
@@ -5134,10 +5147,8 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             f"📖 <b>Page {page} of {total_pages}</b> ({total_count} total records)\n\n"
         )
         for r in page_records:
-            icon = "🟢" if r["amount"] >= 0 else "🔴"
-            sign = "+" if r["amount"] >= 0 else ""
             msg += (
-                f"{icon} <b>{sign}₹{abs(r['amount']):.2f}</b> — <b>{r['type']}</b>\n"
+                f"{r['icon']} <b>{r['sign']}₹{r['amount']:.2f}</b> — <b>{r['type']}</b>\n"
                 f"  └ <b>Ref:</b> <code>{r['id']}</code>\n"
                 f"  └ <b>Details:</b> <i>{r['description']}</i>\n"
                 f"  └ <b>Date:</b> {r['date_str']}\n\n"
@@ -5377,8 +5388,12 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         
         buttons = [
             [
-                {"text": "📥 Pending Deposits", "callback_data": "admin_view_pending_deposits"},
-                {"text": "📜 Deposit History", "callback_data": "admin_deposit_history_page_1"}
+                {"text": "📥 Pending Verification", "callback_data": "admin_view_pending_deposits"},
+                {"text": "📜 Deposit History (All)", "callback_data": "admin_dep_all_page_1"}
+            ],
+            [
+                {"text": "🕒 Last 24 Hours Deposits", "callback_data": "admin_dep_24h_page_1"},
+                {"text": "🟢 Approved Deposits", "callback_data": "admin_dep_approved_page_1"}
             ],
             [
                 {"text": "💰 Manual Wallet Credit", "callback_data": "admin_payment_manual_credit_start"}
@@ -5391,27 +5406,67 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await answer_callback_query(callback_query_id)
         return
 
-    elif data.startswith("admin_deposit_history_page_"):
+    elif (data.startswith("admin_deposit_history_page_") or 
+          data.startswith("admin_dep_24h_page_") or 
+          data.startswith("admin_dep_all_page_") or 
+          data.startswith("admin_dep_approved_page_") or 
+          data.startswith("admin_dep_pending_page_") or 
+          data.startswith("admin_dep_rejected_page_")):
         if not is_admin:
             await answer_callback_query(callback_query_id, "Unauthorized!")
             return
-        page = int(data.replace("admin_deposit_history_page_", "").strip())
+            
+        mode = "all"
+        if "dep_24h_page_" in data:
+            mode = "24h"
+            page_str = data.replace("admin_dep_24h_page_", "").strip()
+        elif "dep_approved_page_" in data:
+            mode = "approved"
+            page_str = data.replace("admin_dep_approved_page_", "").strip()
+        elif "dep_pending_page_" in data:
+            mode = "pending"
+            page_str = data.replace("admin_dep_pending_page_", "").strip()
+        elif "dep_rejected_page_" in data:
+            mode = "rejected"
+            page_str = data.replace("admin_dep_rejected_page_", "").strip()
+        elif "dep_all_page_" in data:
+            mode = "all"
+            page_str = data.replace("admin_dep_all_page_", "").strip()
+        else:
+            page_str = data.replace("admin_deposit_history_page_", "").strip()
+            
+        try:
+            page = int(page_str)
+        except ValueError:
+            page = 1
+            
         limit = 5
-        offset = (page - 1) * limit
-        
         query = db.query(Order).filter(Order.id.like("TOPUP-%"))
+        
+        if mode == "24h":
+            cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=24)
+            query = query.filter(Order.created_at >= cutoff)
+        elif mode == "approved":
+            query = query.filter(Order.status.in_(["Completed", "Approved", "Paid"]))
+        elif mode == "pending":
+            query = query.filter(Order.status == "Pending Verification")
+        elif mode == "rejected":
+            query = query.filter(Order.status.in_(["Cancelled", "Rejected"]))
+            
         total_count = query.count()
         total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
         page = max(1, min(page, total_pages))
         
-        deposits = query.order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
+        deposits = query.order_by(Order.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
         
         upi_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
         active_upi_id = upi_cfg.value if upi_cfg else "pranjalottery@fam"
         
-        msg = f"📜 <b>Deposit Transaction History (Page {page}/{total_pages}):</b>\n\n"
+        mode_label = "🕒 Last 24 Hours" if mode == "24h" else "🟢 Approved" if mode == "approved" else "🟡 Pending" if mode == "pending" else "🔴 Rejected" if mode == "rejected" else "📜 All Time"
+        
+        msg = f"📜 <b>Deposit History — {mode_label}</b>\n<i>Page {page} of {total_pages} ({total_count} total records)</i>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
         for d in deposits:
-            status_emoji = "🟢" if d.status == "Completed" else "🟡" if d.status == "Pending Verification" else "🔴"
+            status_emoji = "🟢" if d.status in ("Completed", "Approved", "Paid") else "🟡" if d.status == "Pending Verification" else "🔴"
             utr_lbl = d.transaction_id or "No UTR"
             
             _ist_time = d.created_at + datetime.timedelta(hours=5, minutes=30) if d.created_at else None
@@ -5421,28 +5476,43 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             u_tg = d.user.telegram_id if d.user else d.user_id
             
             note_rec = db.query(OrderNote).filter(OrderNote.order_id == d.id).order_by(OrderNote.created_at.desc()).first()
-            approved_by = note_rec.admin_username if note_rec else ("System Auto" if d.status == "Completed" else "—")
+            approved_by = note_rec.admin_username if note_rec else ("System Auto" if d.status in ("Completed", "Approved") else "—")
             
             msg += (
-                f"{status_emoji} <b>ID:</b> <code>{d.id}</code> — <b>₹{d.total_payable:.2f}</b>\n"
+                f"{status_emoji} <b>ID:</b> <code>{d.id}</code> — <b>₹{d.total_payable:.2f}</b> ({d.status})\n"
                 f"  👤 <b>User:</b> {u_name} (ID: <code>{u_tg}</code>)\n"
                 f"  💳 <b>UPI ID:</b> <code>{active_upi_id}</code> | 🔢 <b>UTR:</b> <code>{utr_lbl}</code>\n"
-                f"  👮 <b>Approved By:</b> <code>{approved_by}</code>\n"
+                f"  👮 <b>Processed By:</b> <code>{approved_by}</code>\n"
                 f"  📅 <b>Date:</b> {date_str}\n"
                 f"  ━━━━━━━━━━━━━━━━━━━━━━\n"
             )
             
         if not deposits:
-            msg += "No deposit requests found.\n"
+            msg += "<i>No deposit requests found under this filter.</i>\n"
             
-        buttons = []
+        cb_prefix = f"admin_dep_{mode}_page_"
+        buttons = [
+            [
+                {"text": ("▶️ 🕒 24 Hours" if mode == "24h" else "🕒 24 Hours"), "callback_data": "admin_dep_24h_page_1"},
+                {"text": ("▶️ 🟢 Approved" if mode == "approved" else "🟢 Approved"), "callback_data": "admin_dep_approved_page_1"}
+            ],
+            [
+                {"text": ("▶️ 🟡 Pending" if mode == "pending" else "🟡 Pending"), "callback_data": "admin_dep_pending_page_1"},
+                {"text": ("▶️ 🔴 Rejected" if mode == "rejected" else "🔴 Rejected"), "callback_data": "admin_dep_rejected_page_1"}
+            ],
+            [
+                {"text": ("▶️ 📜 All Time" if mode == "all" else "📜 All Time"), "callback_data": "admin_dep_all_page_1"}
+            ]
+        ]
+        
         nav_row = []
         if page > 1:
-            nav_row.append({"text": "⬅️ Prev", "callback_data": f"admin_deposit_history_page_{page-1}"})
+            nav_row.append({"text": "⬅️ Prev", "callback_data": f"{cb_prefix}{page-1}"})
         if page < total_pages:
-            nav_row.append({"text": "Next ➡️", "callback_data": f"admin_deposit_history_page_{page+1}"})
+            nav_row.append({"text": "Next ➡️", "callback_data": f"{cb_prefix}{page+1}"})
         if nav_row:
             buttons.append(nav_row)
+            
         buttons.append([{"text": "🔙 Back to Payment Management", "callback_data": "admin_payment_management"}])
         
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
