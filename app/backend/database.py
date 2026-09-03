@@ -129,8 +129,17 @@ class User(TimestampMixin, Base):
     def address(self) -> str | None:
         if self.saved_addresses:
             default_addr = next((sa for sa in self.saved_addresses if sa.is_default), self.saved_addresses[0])
-            return default_addr.full_address if default_addr else None
-        return None
+            if default_addr and default_addr.full_address:
+                return default_addr.full_address
+        return getattr(self, "_temp_address", None)
+
+    @address.setter
+    def address(self, val: str | None) -> None:
+        self._temp_address = val
+        if self.saved_addresses:
+            default_addr = next((sa for sa in self.saved_addresses if sa.is_default), self.saved_addresses[0])
+            if default_addr:
+                default_addr.full_address = val
 
     __table_args__ = (
         Index("ix_users_role_created", "role", "created_at"),
@@ -572,11 +581,65 @@ class WithdrawalRequest(TimestampMixin, Base):
 PERSISTENT_BACKUP_PATH = os.path.join(DATA_DIR, "db_persistent_state.json")
 PERSISTENT_FILE_ID_PATH = os.path.join(DATA_DIR, "latest_snapshot_file_id.txt")
 
+FIREBASE_KEY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firebase-key.json")
+
+def upload_snapshot_to_firebase(data: dict) -> bool:
+    """Uploads database snapshot silently to Firebase Realtime Database without sending Telegram document messages."""
+    if not os.path.exists(FIREBASE_KEY_PATH):
+        return False
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, db as fb_db
+        
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(FIREBASE_KEY_PATH)
+            app = firebase_admin.initialize_app(cred, {
+                'databaseURL': 'https://studio-8565200409-a3bd2-default-rtdb.firebaseio.com'
+            })
+        else:
+            app = firebase_admin.get_app()
+            
+        ref = fb_db.reference('persistent_db_state', app=app)
+        ref.set(data)
+        logger.info("[PERSISTENCE] Successfully saved DB snapshot to Firebase Realtime Database!")
+        return True
+    except Exception as e:
+        logger.warning(f"[PERSISTENCE] Firebase save failed: {e}")
+        return False
+
+
+def download_snapshot_from_firebase() -> dict | None:
+    """Downloads persistent database snapshot from Firebase Realtime Database."""
+    if not os.path.exists(FIREBASE_KEY_PATH):
+        return None
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, db as fb_db
+        
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(FIREBASE_KEY_PATH)
+            app = firebase_admin.initialize_app(cred, {
+                'databaseURL': 'https://studio-8565200409-a3bd2-default-rtdb.firebaseio.com'
+            })
+        else:
+            app = firebase_admin.get_app()
+            
+        ref = fb_db.reference('persistent_db_state', app=app)
+        snapshot_data = ref.get()
+        if snapshot_data and isinstance(snapshot_data, dict):
+            logger.info(f"[PERSISTENCE] Restored latest DB snapshot from Firebase Realtime Database!")
+            return snapshot_data
+    except Exception as e:
+        logger.warning(f"[PERSISTENCE] Firebase restore failed: {e}")
+    return None
+
+
 def upload_snapshot_to_telegram_cloud(file_path: str) -> bool:
-    """Saves persistent database snapshot quietly and pins it to Telegram Cloud Storage for guaranteed restore on container redeploys."""
+    """Saves persistent database snapshot to a designated Telegram Channel if configured (does NOT send to personal admin chat)."""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    backup_chat = os.getenv("SNAPSHOT_CHANNEL_ID", "").strip() or os.getenv("ADMIN_TELEGRAM_ID", "7958236048").strip()
-    if not bot_token or not backup_chat or not os.path.exists(file_path):
+    backup_chat = os.getenv("SNAPSHOT_CHANNEL_ID", "").strip()
+    # ONLY upload to Telegram if SNAPSHOT_CHANNEL_ID is explicitly configured as a private channel (starts with -100 or @)
+    if not bot_token or not backup_chat or not (backup_chat.startswith("-100") or backup_chat.startswith("@")) or not os.path.exists(file_path):
         return True
     try:
         import urllib.request, uuid
@@ -613,35 +676,22 @@ def upload_snapshot_to_telegram_cloud(file_path: str) -> bool:
                             file_id_out.write(file_id)
                     except Exception:
                         pass
-                
-                # Pin the snapshot document in Telegram chat so getChat can ALWAYS retrieve it on fresh boots
-                if msg_id and backup_chat:
-                    try:
-                        pin_url = f"https://api.telegram.org/bot{bot_token}/pinChatMessage"
-                        pin_body = json.dumps({"chat_id": backup_chat, "message_id": msg_id, "disable_notification": True}).encode("utf-8")
-                        pin_req = urllib.request.Request(pin_url, data=pin_body, headers={"Content-Type": "application/json"}, method="POST")
-                        urllib.request.urlopen(pin_req, timeout=5)
-                    except Exception as pe:
-                        logger.warning(f"[PERSISTENCE] pinChatMessage failed: {pe}")
-
-                logger.info("[PERSISTENCE] Successfully backed up DB snapshot quietly & pinned in Telegram Cloud Storage!")
                 return True
     except Exception as e:
-        logger.warning(f"[PERSISTENCE] Silent cloud backup failed: {e}")
+        logger.warning(f"[PERSISTENCE] Silent Telegram channel backup failed: {e}")
     return False
 
 
 def download_snapshot_from_telegram_cloud() -> dict | None:
-    """Downloads the most recent persistent JSON snapshot from Telegram Cloud Storage."""
+    """Downloads the most recent persistent JSON snapshot from Telegram Channel Storage if configured."""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    admin_id = os.getenv("SNAPSHOT_CHANNEL_ID", "").strip() or os.getenv("ADMIN_TELEGRAM_ID", "7958236048").strip()
-    if not bot_token:
+    admin_id = os.getenv("SNAPSHOT_CHANNEL_ID", "").strip()
+    if not bot_token or not (admin_id.startswith("-100") or admin_id.startswith("@")):
         return None
     try:
         import urllib.request
         target_file_id = None
 
-        # 1. Try reading pinned message from Admin / Backup Chat
         if admin_id:
             try:
                 chat_url = f"https://api.telegram.org/bot{bot_token}/getChat?chat_id={admin_id}"
@@ -657,7 +707,6 @@ def download_snapshot_from_telegram_cloud() -> dict | None:
             except Exception as e:
                 logger.warning(f"[PERSISTENCE] Failed getChat pinned_message lookup: {e}")
 
-        # 2. Try saved local file_id fallback if pinned_message look up didn't yield file_id
         if not target_file_id and os.path.exists(PERSISTENT_FILE_ID_PATH):
             try:
                 with open(PERSISTENT_FILE_ID_PATH, "r", encoding="utf-8") as f:
@@ -665,30 +714,9 @@ def download_snapshot_from_telegram_cloud() -> dict | None:
             except Exception:
                 pass
 
-        # 3. Fallback to getUpdates
         if not target_file_id:
-            try:
-                updates_url = f"https://api.telegram.org/bot{bot_token}/getUpdates?allowed_updates=[\"message\"]&limit=100"
-                req = urllib.request.Request(updates_url, method="GET")
-                with urllib.request.urlopen(req, timeout=8) as resp:
-                    res_data = json.loads(resp.read().decode("utf-8"))
-                    if res_data.get("ok"):
-                        updates = res_data.get("result", [])
-                        for up in reversed(updates):
-                            msg = up.get("message", {})
-                            caption = msg.get("caption", "")
-                            doc = msg.get("document")
-                            if doc and "[AUTO_DB_SNAPSHOT" in caption:
-                                target_file_id = doc.get("file_id")
-                                break
-            except Exception:
-                pass
-
-        if not target_file_id:
-            logger.warning("[PERSISTENCE] No pinned snapshot found on Telegram Cloud.")
             return None
 
-        # Resolve Telegram file_path using file_id
         file_url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={target_file_id}"
         with urllib.request.urlopen(urllib.request.Request(file_url, method="GET"), timeout=8) as file_resp:
             file_info = json.loads(file_resp.read().decode("utf-8"))
@@ -698,12 +726,10 @@ def download_snapshot_from_telegram_cloud() -> dict | None:
             if not file_path:
                 return None
 
-        # Download content from Telegram CDN
         dl_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
         with urllib.request.urlopen(urllib.request.Request(dl_url, method="GET"), timeout=10) as dl_resp:
             content_str = dl_resp.read().decode("utf-8")
             snapshot_data = json.loads(content_str)
-            logger.info(f"[PERSISTENCE] Downloaded latest DB snapshot from Telegram Cloud Storage (saved_at: {snapshot_data.get('saved_at')})!")
             return snapshot_data
     except Exception as e:
         logger.warning(f"[PERSISTENCE] Telegram Cloud backup download failed: {e}")
@@ -711,7 +737,7 @@ def download_snapshot_from_telegram_cloud() -> dict | None:
 
 
 def auto_save_persistent_db_state(db=None) -> bool:
-    """Saves non-volatile user balances, addresses, orders, wallet transactions, and coupons to a persistent JSON snapshot."""
+    """Saves non-volatile user balances, addresses, orders, wallet transactions, and coupons to a persistent JSON snapshot and Firebase Realtime Database."""
     close_after = False
     if db is None:
         db = SessionLocal()
@@ -732,7 +758,7 @@ def auto_save_persistent_db_state(db=None) -> bool:
                 "display_name": u.display_name,
                 "phone": u.phone,
                 "city": u.city,
-                "address": u.saved_addresses[0].full_address if u.saved_addresses else None,
+                "address": u.saved_addresses[0].full_address if u.saved_addresses else getattr(u, "_temp_address", None),
                 "latitude": float(u.latitude) if u.latitude is not None else None,
                 "longitude": float(u.longitude) if u.longitude is not None else None,
                 "wallet_balance": float(u.wallet_balance or 0.0),
@@ -806,7 +832,10 @@ def auto_save_persistent_db_state(db=None) -> bool:
         with open(PERSISTENT_BACKUP_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
             
-        # Also upload off-instance snapshot to Telegram Cloud
+        # Silent cloud backup to Firebase Realtime Database (Primary)
+        upload_snapshot_to_firebase(data)
+        
+        # Telegram channel backup (ONLY if dedicated channel configured)
         upload_snapshot_to_telegram_cloud(PERSISTENT_BACKUP_PATH)
         return True
     except Exception as e:
@@ -819,7 +848,10 @@ def auto_save_persistent_db_state(db=None) -> bool:
 
 def auto_restore_persistent_db_state(db) -> bool:
     """Restores user accounts, wallet balances, saved addresses, orders, transactions, and coupons if the database file was reset or replaced on deployment."""
-    data = download_snapshot_from_telegram_cloud()
+    # Try restoring from Firebase Realtime DB first
+    data = download_snapshot_from_firebase()
+    if not data:
+        data = download_snapshot_from_telegram_cloud()
     if not data and os.path.exists(PERSISTENT_BACKUP_PATH):
         try:
             with open(PERSISTENT_BACKUP_PATH, "r", encoding="utf-8") as f:
@@ -845,7 +877,6 @@ def auto_restore_persistent_db_state(db) -> bool:
                     display_name=u_data.get("display_name"),
                     phone=u_data.get("phone"),
                     city=u_data.get("city", "India"),
-                    address=u_data.get("address"),
                     latitude=u_data.get("latitude"),
                     longitude=u_data.get("longitude"),
                     wallet_balance=float(u_data.get("wallet_balance", 0.0)),
@@ -854,20 +885,30 @@ def auto_restore_persistent_db_state(db) -> bool:
                     bot_cart=u_data.get("bot_cart"),
                     telegram_verified=bool(u_data.get("telegram_verified", False))
                 )
+                if u_data.get("address"):
+                    u.address = u_data.get("address")
                 db.add(u)
                 restored_users += 1
             else:
-                # Synchronize details if higher or missing in existing record
+                # Synchronize ALL details for existing returning user
                 b_bal = float(u_data.get("wallet_balance", 0.0))
                 if b_bal > existing.wallet_balance:
                     existing.wallet_balance = b_bal
-                if not existing.address and u_data.get("address"):
+                if u_data.get("address"):
                     existing.address = u_data.get("address")
-                if not existing.phone and u_data.get("phone"):
+                if u_data.get("phone"):
                     existing.phone = u_data.get("phone")
-                if existing.latitude is None and u_data.get("latitude") is not None:
+                if u_data.get("latitude") is not None:
                     existing.latitude = u_data.get("latitude")
                     existing.longitude = u_data.get("longitude")
+                if u_data.get("city"):
+                    existing.city = u_data.get("city")
+                if u_data.get("username"):
+                    existing.username = u_data.get("username")
+                if u_data.get("display_name"):
+                    existing.display_name = u_data.get("display_name")
+                if bool(u_data.get("is_admin", False)):
+                    existing.role = "admin"
 
         restored_addrs = 0
         for sa_data in data.get("saved_addresses", []):
