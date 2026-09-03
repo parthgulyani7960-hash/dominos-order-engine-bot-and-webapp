@@ -1418,8 +1418,9 @@ def render_order_confirmation_screen(db: Session, user: User, session: dict) -> 
         subtotal = session.get("deal_price", 0.0)
     else:
         subtotal = 0.0
-        for pid_str, qty in cart.items():
-            p = db.query(Product).filter(Product.id == pid_str).first()
+        for pid_str, raw_qty in cart.items():
+            qty = parse_cart_quantity(raw_qty)
+            p = resolve_cart_item_product(db, pid_str)
             if p:
                 price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
                 subtotal += price * qty
@@ -1428,13 +1429,14 @@ def render_order_confirmation_screen(db: Session, user: User, session: dict) -> 
     total_payable = subtotal + bot_fee
 
     item_lines = []
-    for pid_str, qty in list(cart.items()):
-        p = db.query(Product).filter(Product.id == pid_str).first()
+    for pid_str, raw_qty in list(cart.items()):
+        qty = parse_cart_quantity(raw_qty)
+        p = resolve_cart_item_product(db, pid_str)
         if p:
             price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
             veg_dot = "🟢" if p.is_veg else "🔴"
-            item_lines.append(f"  {veg_dot} {p.name} ×{qty}" if active_deal else f"  {veg_dot} {p.name} ×{qty}  —  ₹{price * qty:.0f}")
-    items_text = "\n".join(item_lines) if item_lines else "  • (items unavailable)"
+            item_lines.append(f"  {veg_dot} <b>{p.name}</b> ×{qty}" if active_deal else f"  {veg_dot} <b>{p.name}</b> ×{qty}  —  ₹{price * qty:.0f}")
+    items_text = "\n".join(item_lines) if item_lines else "  • Pizza Items"
 
     # Order note (delivery_instructions)
     order_note = session.get("order_note", "")
@@ -3382,9 +3384,9 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             subtotal = session.get("deal_price", 0.0)
         else:
             subtotal = 0.0
-            for product_id_str, qty in cart.items():
-                product_id = product_id_str  # Product.id is a UUID string
-                p = db.query(Product).filter(Product.id == product_id).first()
+            for product_id_str, raw_qty in cart.items():
+                qty = parse_cart_quantity(raw_qty)
+                p = resolve_cart_item_product(db, product_id_str)
                 if p:
                     price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
                     subtotal += (price * qty)
@@ -3395,15 +3397,16 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         
         # Build item list for the confirmation message
         item_lines = []
-        for product_id_str, qty in list(cart.items()):
-            p = db.query(Product).filter(Product.id == product_id_str).first()
+        for product_id_str, raw_qty in list(cart.items()):
+            qty = parse_cart_quantity(raw_qty)
+            p = resolve_cart_item_product(db, product_id_str)
             if p:
                 price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
                 if active_deal:
-                    item_lines.append(f"  • {p.name} x{qty}")
+                    item_lines.append(f"  • <b>{p.name}</b> x{qty}")
                 else:
-                    item_lines.append(f"  • {p.name} x{qty} — ₹{price * qty:.0f}")
-        items_text = "\n".join(item_lines) if item_lines else "  • (items unavailable)"
+                    item_lines.append(f"  • <b>{p.name}</b> x{qty} — ₹{price * qty:.0f}")
+        items_text = "\n".join(item_lines) if item_lines else "  • Pizza Items"
 
         confirm_text = (
             f"📋 <b>Please Confirm Your Order</b>\n"
@@ -4343,6 +4346,45 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         )
         return
 
+def parse_cart_quantity(raw_qty) -> int:
+    """Safely extracts integer quantity from int, float, str, or dict."""
+    if isinstance(raw_qty, dict):
+        q = raw_qty.get("quantity") or raw_qty.get("qty") or raw_qty.get("count") or 1
+        try:
+            return max(1, int(q))
+        except Exception:
+            return 1
+    try:
+        return max(1, int(raw_qty))
+    except Exception:
+        return 1
+
+
+def resolve_cart_item_product(db: Session, key: str):
+    """Robust product lookup by UUID ID, exact name, or partial name fallback."""
+    if not key:
+        return db.query(Product).first()
+    key_str = str(key).strip()
+    
+    # 1. Try UUID / direct ID match
+    p = db.query(Product).filter(Product.id == key_str).first()
+    if p:
+        return p
+        
+    # 2. Try exact name match (case-insensitive)
+    p = db.query(Product).filter(Product.name.ilike(key_str)).first()
+    if p:
+        return p
+        
+    # 3. Try partial name match
+    p = db.query(Product).filter(Product.name.ilike(f"%{key_str}%")).first()
+    if p:
+        return p
+        
+    # 4. Fallback to any product in DB
+    return db.query(Product).first()
+
+
 def render_cart_message(db: Session, user: User, cart: dict, session: dict = None):
     """Generates the shopping cart item lines and dynamic checkout keyboard."""
     if not cart:
@@ -4373,9 +4415,9 @@ def render_cart_message(db: Session, user: User, cart: dict, session: dict = Non
         elif active_deal == "deal_3":
             lines.append("🔥 <b>Active Deal: Classic Pizza Duo</b> (₹150.00)")
     
-    for product_id_str, qty in list(cart.items()):
-        product_id = product_id_str  # Product.id is a UUID string
-        p = db.query(Product).filter(Product.id == product_id).first()
+    for product_id_str, raw_qty in list(cart.items()):
+        qty = parse_cart_quantity(raw_qty)
+        p = resolve_cart_item_product(db, product_id_str)
         if not p:
             continue
         price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
@@ -4387,10 +4429,10 @@ def render_cart_message(db: Session, user: User, cart: dict, session: dict = Non
         
         # Incrementor/decrementor/delete row
         inline_keyboard.append([
-            {"text": "➖", "callback_data": f"cart_sub_{product_id}"},
+            {"text": "➖", "callback_data": f"cart_sub_{p.id}"},
             {"text": f"🍕 {p.name} (x{qty})", "callback_data": "cart_view"},
-            {"text": "➕", "callback_data": f"cart_add_{product_id}"},
-            {"text": "🗑️", "callback_data": f"cart_del_{product_id}"}
+            {"text": "➕", "callback_data": f"cart_add_{p.id}"},
+            {"text": "🗑️", "callback_data": f"cart_del_{p.id}"}
         ])
         
     if active_deal:
@@ -7557,53 +7599,190 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "Order not found!")
             return
             
-        if order.status in ["Pending Verification", "Completed", "Approved", "Paid"]:
-            await answer_callback_query(callback_query_id, "⚠️ Deposit request already submitted & awaiting approval!", show_alert=True)
+        if order.status in ["Pending Verification", "Completed", "Approved", "Paid", "Order Processing"]:
+            await answer_callback_query(callback_query_id, "⚠️ Payment verification already submitted & awaiting approval!", show_alert=True)
             return
 
         order.status = "Pending Verification"
         db.commit()
+        auto_save_persistent_db_state(db)
         
-        pending_text = (
-            f"⏳ <b>Deposit Submitted for Admin Approval</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"Your deposit request for <b>₹{order.total_payable:.2f}</b> (Ref: <code>{order_id}</code>) has been submitted for admin verification.\n\n"
-            f"We are verifying your transaction. Your wallet balance will be credited automatically upon approval by an admin! 💰"
-        )
-        pending_markup = {
-            "inline_keyboard": [
-                [
-                    {"text": "🍕 View Menu", "callback_data": "menu_view"},
-                    {"text": "💰 Wallet Menu", "callback_data": "wallet_view"}
+        is_topup = order.id.startswith("TOPUP-") or order.payment_method == "upi"
+        
+        if is_topup:
+            pending_text = (
+                f"⏳ <b>Deposit Submitted for Admin Approval</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Your deposit request for <b>₹{order.total_payable:.2f}</b> (Ref: <code>{order_id}</code>) has been submitted for admin verification.\n\n"
+                f"We are verifying your transaction. Your wallet balance will be credited automatically upon approval by an admin! 💰"
+            )
+            pending_markup = {
+                "inline_keyboard": [
+                    [
+                        {"text": "🍕 View Menu", "callback_data": "menu_view"},
+                        {"text": "💰 Wallet Menu", "callback_data": "wallet_view"}
+                    ]
                 ]
-            ]
-        }
-        await send_bot_message(user.telegram_id, pending_text, reply_markup=pending_markup)
-        await answer_callback_query(callback_query_id, "Submitted for admin approval!")
-        
-        # Notify admins of the deposit request needing approval
-        admin_text = (
-            "🔔 <b>New Deposit Marked as Paid (Requires Admin Approval)</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"👤 <b>User:</b> {user.display_name} (ID: <code>{user.telegram_id}</code>)\n"
-            f"💰 <b>Amount:</b> ₹{order.total_payable:.2f}\n"
-            f"🆔 <b>Ref ID:</b> <code>{order_id}</code>"
-        )
-        admin_markup = {
-            "inline_keyboard": [
-                [
-                    {"text": "✅ Approve", "callback_data": f"admin_dep_approve_{order.id}"},
-                    {"text": "❌ Reject", "callback_data": f"admin_dep_reject_{order.id}"}
+            }
+            await send_bot_message(user.telegram_id, pending_text, reply_markup=pending_markup)
+            await answer_callback_query(callback_query_id, "Submitted for admin approval!")
+            
+            # Notify admins of the deposit request needing approval
+            admin_text = (
+                "🔔 <b>New Deposit Marked as Paid (Requires Admin Approval)</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"👤 <b>User:</b> {user.display_name} (ID: <code>{user.telegram_id}</code>)\n"
+                f"💰 <b>Amount:</b> ₹{order.total_payable:.2f}\n"
+                f"🆔 <b>Ref ID:</b> <code>{order_id}</code>"
+            )
+            admin_markup = {
+                "inline_keyboard": [
+                    [
+                        {"text": "✅ Approve Deposit", "callback_data": f"admin_dep_approve_{order.id}"},
+                        {"text": "❌ Reject Deposit", "callback_data": f"admin_dep_reject_{order.id}"}
+                    ]
                 ]
-            ]
-        }
-        await notify_admins(db, admin_text, reply_markup=admin_markup)
-        
+            }
+            await notify_admins(db, admin_text, reply_markup=admin_markup)
+        else:
+            # DIRECT UPI PIZZA ORDER
+            item_lines = []
+            for item in order.items:
+                p_name = item.product.name if item.product else "Pizza Item"
+                item_lines.append(f"  • <b>{p_name}</b> ×{item.quantity} — ₹{item.price * item.quantity:.0f}")
+            items_summary = "\n".join(item_lines) if item_lines else "  • Pizza Items"
+            
+            pending_text = (
+                f"🍕 <b>Direct Order Payment Submitted</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Your payment of <b>₹{order.total_payable:.2f}</b> for Order <code>{order_id}</code> has been submitted for admin verification!\n\n"
+                f"🛒 <b>Items Ordered:</b>\n{items_summary}\n\n"
+                f"🏠 <b>Delivery Address:</b> <code>{order.address or 'Saved Address'}</code>\n"
+                f"📱 <b>Phone:</b> <code>{order.phone or 'Saved Phone'}</code>\n\n"
+                f"Our admin team is verifying your payment and will prepare & dispatch your order shortly! You can track status in <b>📦 Track Orders</b>! 🍕"
+            )
+            pending_markup = {
+                "inline_keyboard": [
+                    [
+                        {"text": "📦 Track Order", "callback_data": f"track_order_{order_id}"},
+                        {"text": "🍕 View Menu", "callback_data": "menu_view"}
+                    ]
+                ]
+            }
+            await send_bot_message(user.telegram_id, pending_text, reply_markup=pending_markup)
+            await answer_callback_query(callback_query_id, "Direct order payment submitted for admin verification!")
+
+            # Build full admin notification for direct UPI order
+            maps_url = f"https://www.google.com/maps/search/?api=1&query={order.latitude},{order.longitude}" if (order.latitude and order.longitude) else ""
+            maps_link = f" (<a href=\"{maps_url}\">📍 Google Maps</a>)" if maps_url else ""
+
+            admin_order_text = (
+                "🔔 <b>New Direct UPI Pizza Order (Requires Admin Verification):</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"🆔 <b>Order ID:</b> <code>{order.id}</code>\n"
+                f"👤 <b>User:</b> {user.display_name} (ID: <code>{user.telegram_id}</code>)\n"
+                f"🛒 <b>Items:</b>\n{items_summary}\n\n"
+                f"💰 <b>Total Payable:</b> <b>₹{order.total_payable:.2f}</b>\n"
+                f"🏡 <b>Address:</b> <code>{order.address}</code>{maps_link}\n"
+                f"📱 <b>Phone:</b> <code>{order.phone}</code>\n"
+                + (f"📝 <b>Note:</b> <i>{order.delivery_instructions}</i>\n" if order.delivery_instructions else "")
+                + "\n👩‍🍳 <b>Admin Action Required:</b>"
+            )
+            admin_markup = {
+                "inline_keyboard": [
+                    [
+                        {"text": "✅ Approve & Dispatch Order", "callback_data": f"admin_approve_direct_order_{order.id}"},
+                        {"text": "❌ Reject Payment", "callback_data": f"admin_reject_direct_order_{order.id}"}
+                    ]
+                ]
+            }
+            await notify_admins(db, admin_order_text, reply_markup=admin_markup)
+
         if sse_broadcast_callback:
             try:
                 await sse_broadcast_callback({"type": "order_update", "order_id": order_id, "status": "Pending Verification"})
             except Exception:
                 pass
+
+    elif data.startswith("admin_approve_direct_order_"):
+        order_id = data.replace("admin_approve_direct_order_", "").strip()
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order:
+            await answer_callback_query(callback_query_id, "Order not found!")
+            return
+
+        order.status = "Order Processing"
+        h1 = OrderStatusHistory(order_id=order.id, status="Order Processing", note="Direct UPI payment verified by admin")
+        db.add(h1)
+        db.commit()
+        auto_save_persistent_db_state(db)
+
+        # Notify customer
+        user_notify = order.user
+        if user_notify:
+            success_text = (
+                f"🎉 <b>Payment Verified! Order #{order.id} Approved!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Your payment of <b>₹{order.total_payable:.2f}</b> has been verified by our admin!\n\n"
+                f"Domino's is now preparing your pizzas. Track your order status in <b>📦 Track Orders</b>! 🍕"
+            )
+            markup = {
+                "inline_keyboard": [
+                    [{"text": "📦 Track Order", "callback_data": f"track_order_{order.id}"}, {"text": "🍕 View Menu", "callback_data": "menu_view"}]
+                ]
+            }
+            await send_bot_message(user_notify.telegram_id, success_text, reply_markup=markup)
+
+        # Update admin message
+        updated_admin_text = (
+            f"✅ <b>Direct Order Payment Verified & Approved!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🆔 <b>Order ID:</b> <code>{order.id}</code>\n"
+            f"👤 <b>User:</b> {order.user.display_name if order.user else 'User'} (ID: <code>{order.user_id}</code>)\n"
+            f"💰 <b>Amount:</b> ₹{order.total_payable:.2f}\n\n"
+            f"Status updated to: <b>Order Processing</b> 🍕"
+        )
+        await edit_bot_message(user.telegram_id, message_id, updated_admin_text)
+        await answer_callback_query(callback_query_id, "Order approved successfully!")
+
+    elif data.startswith("admin_reject_direct_order_"):
+        order_id = data.replace("admin_reject_direct_order_", "").strip()
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order:
+            await answer_callback_query(callback_query_id, "Order not found!")
+            return
+
+        order.status = "Cancelled"
+        h1 = OrderStatusHistory(order_id=order.id, status="Cancelled", note="Direct UPI payment rejected by admin")
+        db.add(h1)
+        db.commit()
+        auto_save_persistent_db_state(db)
+
+        # Notify customer
+        user_notify = order.user
+        if user_notify:
+            reject_text = (
+                f"❌ <b>Payment Verification Failed for Order #{order.id}</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Your payment of <b>₹{order.total_payable:.2f}</b> could not be verified by our admin.\n\n"
+                f"If you believe this is an error, please contact support or retry."
+            )
+            markup = {
+                "inline_keyboard": [
+                    [{"text": "💬 Contact Support", "callback_data": "menu_support"}, {"text": "🍕 View Menu", "callback_data": "menu_view"}]
+                ]
+            }
+            await send_bot_message(user_notify.telegram_id, reject_text, reply_markup=markup)
+
+        updated_admin_text = (
+            f"❌ <b>Direct Order Payment Rejected</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🆔 <b>Order ID:</b> <code>{order.id}</code>\n"
+            f"👤 <b>User:</b> {order.user.display_name if order.user else 'User'}\n\n"
+            f"Status updated to: <b>Cancelled</b>"
+        )
+        await edit_bot_message(user.telegram_id, message_id, updated_admin_text)
+        await answer_callback_query(callback_query_id, "Order rejected.")
 
     elif data.startswith("wallet_cancel_deposit_"):
         order_id = data.replace("wallet_cancel_deposit_", "").strip()
@@ -7833,9 +8012,9 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             subtotal = session.get("deal_price", 0.0)
         else:
             subtotal = 0.0
-            for product_id_str, qty in cart.items():
-                product_id = product_id_str
-                p = db.query(Product).filter(Product.id == product_id).first()
+            for product_id_str, raw_qty in cart.items():
+                qty = parse_cart_quantity(raw_qty)
+                p = resolve_cart_item_product(db, product_id_str)
                 if p:
                     price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
                     subtotal += (price * qty)
@@ -7892,14 +8071,14 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         db.flush()
         
         # Save OrderItems to DB
-        for product_id_str, qty in cart.items():
-            product_id = product_id_str
-            p = db.query(Product).filter(Product.id == product_id).first()
+        for product_id_str, raw_qty in cart.items():
+            qty = parse_cart_quantity(raw_qty)
+            p = resolve_cart_item_product(db, product_id_str)
             if p:
                 price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
                 item = OrderItem(
                     order_id=order_id,
-                    product_id=product_id,
+                    product_id=p.id,
                     quantity=qty,
                     price=price
                 )

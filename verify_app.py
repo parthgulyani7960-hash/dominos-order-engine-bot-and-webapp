@@ -1174,6 +1174,84 @@ class TestPizzaPlatform(unittest.TestCase):
             call_args = mock_send.call_args[0]
             self.assertIn("Account Suspended", call_args[1])
 
+    def test_21_direct_qr_order_and_cart_item_rendering(self):
+        """Verifies direct UPI QR order workflow and robust cart item text rendering."""
+        import asyncio
+        from unittest.mock import patch, AsyncMock
+        from app.backend.bot import (
+            resolve_cart_item_product, parse_cart_quantity, render_cart_message,
+            process_bot_callback_task
+        )
+        
+        test_user = self.db.query(User).filter(User.telegram_id == "111222").first()
+        if not test_user:
+            test_user = User(telegram_id="111222", username="testuser", display_name="Test User", city="Mumbai")
+            self.db.add(test_user)
+            self.db.commit()
+            
+        p1 = self.db.query(Product).first()
+
+        # 1. Verify helper functions
+        prod = resolve_cart_item_product(self.db, "Margherita Classic")
+        self.assertIsNotNone(prod)
+        self.assertIn("Margherita", prod.name)
+        
+        self.assertEqual(parse_cart_quantity({"quantity": 3}), 3)
+        self.assertEqual(parse_cart_quantity(2), 2)
+
+        # 2. Verify render_cart_message with dict & name-based keys
+        cart_data = {"Margherita Classic": {"quantity": 2}}
+        msg, markup = render_cart_message(self.db, test_user, cart_data, {})
+        self.assertIn("Margherita", msg)
+        self.assertNotIn("items unavailable", msg)
+
+        # 3. Test direct QR order placement & payment verification
+        order = Order(
+            id="BOT-TESTQR1",
+            user_id=test_user.id,
+            transaction_id="REF-TESTQR1",
+            original_total=300.0,
+            total_payable=330.0,
+            payment_method="direct_upi",
+            status="Pending Payment",
+            address="123 Pizza Street, Mumbai",
+            phone="9876543210",
+            latitude=19.0760,
+            longitude=72.8777
+        )
+        self.db.add(order)
+        self.db.flush()
+
+        item = OrderItem(order_id=order.id, product_id=p1.id, quantity=2, price=150.0)
+        self.db.add(item)
+        self.db.commit()
+
+        with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
+             patch("app.backend.bot.notify_admins", new_callable=AsyncMock) as mock_notify, \
+             patch("app.backend.bot.answer_callback_query", new_callable=AsyncMock) as mock_answer:
+            asyncio.run(process_bot_callback_task(
+                telegram_id=test_user.telegram_id,
+                first_name="Test",
+                last_name="User",
+                username="testuser",
+                data=f"wallet_marked_paid_{order.id}",
+                message_id=200,
+                callback_query_id="cb_qr"
+            ))
+            
+            # Verify customer notification contains Direct Order Payment header (NOT Deposit)
+            mock_send.assert_called_once()
+            cust_msg = mock_send.call_args[0][1]
+            self.assertIn("Direct Order Payment Submitted", cust_msg)
+            self.assertNotIn("Deposit Submitted for Admin Approval", cust_msg)
+
+            # Verify admin notification contains Direct UPI Pizza Order details
+            mock_notify.assert_called_once()
+            admin_msg = mock_notify.call_args[0][1]
+            self.assertIn("New Direct UPI Pizza Order", admin_msg)
+            admin_markup = mock_notify.call_args[1]["reply_markup"]
+            self.assertIn("admin_approve_direct_order_", admin_markup["inline_keyboard"][0][0]["callback_data"])
+
 def hashlib_sha256(text: str) -> str:
 
 
