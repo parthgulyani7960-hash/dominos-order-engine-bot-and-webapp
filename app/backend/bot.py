@@ -3858,8 +3858,8 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         if not orders:
             track_text = (
                 "📦 <b>Track Orders:</b>\n\n"
-                "No orders placed in the last 24 hours!\n\n"
-                "👉 Click <b>Order App</b> or type /menu to order delicious pizzas!"
+                "No active orders placed in the last 24 hours!\n\n"
+                "👉 Tap <b>🍕 View Menu</b> below to browse delicious pizzas & place your order!"
             )
             await send_bot_animation(
                 user.telegram_id,
@@ -5085,33 +5085,65 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await answer_callback_query(callback_query_id)
 
     elif data.startswith("wallet_tx_history_page_"):
-        page = int(data.replace("wallet_tx_history_page_", "").strip())
+        try:
+            page = int(data.replace("wallet_tx_history_page_", "").strip())
+        except ValueError:
+            page = 1
         limit = 5
-        offset = (page - 1) * limit
         
-        query = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id)
-        total_count = query.count()
+        all_records = []
+        txs = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).all()
+        for t in txs:
+            _ist = (t.created_at + datetime.timedelta(hours=5, minutes=30)) if t.created_at else datetime.datetime.now()
+            all_records.append({
+                "id": f"TXN-{t.id[:8].upper()}",
+                "type": t.type.upper(),
+                "amount": t.amount,
+                "description": t.description or "Wallet Transaction",
+                "date": _ist,
+                "date_str": _ist.strftime("%d %b %Y, %I:%M %p IST")
+            })
+
+        topup_orders = db.query(Order).filter(Order.user_id == user.id, Order.id.like("TOPUP-%"), Order.status.in_(["Completed", "Paid", "Approved"])).all()
+        for o in topup_orders:
+            if not any(r["id"] == f"TXN-{o.id[:8].upper()}" for r in all_records):
+                _ist = (o.created_at + datetime.timedelta(hours=5, minutes=30)) if o.created_at else datetime.datetime.now()
+                all_records.append({
+                    "id": o.id,
+                    "type": "DEPOSIT",
+                    "amount": o.total_payable,
+                    "description": f"UPI Deposit (UTR: {o.transaction_id or 'Verified'})",
+                    "date": _ist,
+                    "date_str": _ist.strftime("%d %b %Y, %I:%M %p IST")
+                })
+        
+        all_records.sort(key=lambda x: x["date"], reverse=True)
+        
+        total_count = len(all_records)
         total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
         page = max(1, min(page, total_pages))
+        offset = (page - 1) * limit
         
-        txs = query.order_by(WalletTransaction.created_at.desc()).offset(offset).limit(limit).all()
+        page_records = all_records[offset:offset+limit]
         
-        msg = f"📜 <b>Your Transaction History (Page {page}/{total_pages}):</b>\n\n"
-        for t in txs:
-            sign = "+" if t.amount >= 0 else ""
-            t_type = t.type.upper()
-            _ist_time = t.created_at + datetime.timedelta(hours=5, minutes=30) if t.created_at else None
-            date_str = _ist_time.strftime("%d %b %Y, %I:%M %p") if _ist_time else "—"
-            
-            icon = "🟢" if t.amount >= 0 else "🔴"
+        msg = (
+            f"📜 <b>Your Wallet Transaction History</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>Account:</b> {user.display_name}\n"
+            f"💵 <b>Current Balance:</b> ₹{user.wallet_balance:.2f}\n"
+            f"📖 <b>Page {page} of {total_pages}</b> ({total_count} total records)\n\n"
+        )
+        for r in page_records:
+            icon = "🟢" if r["amount"] >= 0 else "🔴"
+            sign = "+" if r["amount"] >= 0 else ""
             msg += (
-                f"{icon} <b>{sign}₹{abs(t.amount):.2f}</b> — <b>{t_type}</b>\n"
-                f"  └ Ref: <code>{t.id[:10].upper()}</code>\n"
-                f"  └ Details: <i>{t.description or 'Wallet transaction'}</i>\n"
-                f"  └ Date: {date_str}\n\n"
+                f"{icon} <b>{sign}₹{abs(r['amount']):.2f}</b> — <b>{r['type']}</b>\n"
+                f"  └ <b>Ref:</b> <code>{r['id']}</code>\n"
+                f"  └ <b>Details:</b> <i>{r['description']}</i>\n"
+                f"  └ <b>Date:</b> {r['date_str']}\n\n"
             )
             
-        if not txs:
+        if not page_records:
             msg += "<i>No transaction history recorded yet.</i>\n"
             
         buttons = []
@@ -5326,7 +5358,6 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         if not is_admin:
             await answer_callback_query(callback_query_id, "Unauthorized!")
             return
-            
         pending_deposits_count = db.query(Order).filter(Order.id.like("TOPUP-%"), Order.status == "Pending Verification").count()
         
         today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -5341,7 +5372,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"• <b>Pending Deposits:</b> <code>{pending_deposits_count}</code>\n"
             f"• <b>Today's Revenue:</b> <code>₹{today_revenue:.2f}</code>\n\n"
-            "Select an option below to process deposits, view history, or issue manual credits:"
+            "Select an option below to process deposits, view 24h/all-time history, or issue manual credits:"
         )
         
         buttons = [
@@ -6551,42 +6582,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         order_id = data.replace("admin_dep_approve_", "").strip()
         order = db.query(Order).filter(Order.id == order_id).first()
         if not order:
-            await answer_callback_query(callback_query_id, "Deposit not found!")
+            await answer_callback_query(callback_query_id, "Deposit request not found!")
             return
-        if order.status == "Completed":
-            await answer_callback_query(callback_query_id, "Already approved!")
-            return
-            
-        target_user = order.user
-        target_user.wallet_balance += order.total_payable
-        order.status = "Completed"
-        
-        attempt = db.query(UTRAttempt).filter(UTRAttempt.order_id == order.id).first()
-        if attempt:
-            attempt.is_successful = True
-            
-        # Create WalletTransaction
-        tx = WalletTransaction(
-            user_id=target_user.id,
-            type="deposit",
-            amount=order.total_payable,
-            description=f"Deposit via UTR: {order.transaction_id or 'None'}"
-        )
-        db.add(tx)
-        db.commit()
-
-        # Automatically check and pay any pending orders for target_user
-        await process_auto_pay_for_user(db, target_user)
-        if not is_admin:
-            await answer_callback_query(callback_query_id, "Unauthorized!")
-            return
-        order_id = data.replace("admin_dep_approve_", "").strip()
-        order = db.query(Order).filter(Order.id == order_id).first()
-        if not order:
-            await answer_callback_query(callback_query_id, "Deposit not found!")
-            return
-        if order.status == "Completed":
-            await answer_callback_query(callback_query_id, "Already approved!")
+        if order.status in ["Completed", "Approved", "Paid"]:
+            await answer_callback_query(callback_query_id, "Already approved!", show_alert=True)
             return
             
         target_user = order.user
@@ -6597,64 +6596,72 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         if attempt:
             attempt.is_successful = True
             
-        # Create WalletTransaction
+        # Create WalletTransaction record
         tx = WalletTransaction(
             user_id=target_user.id,
             type="deposit",
             amount=order.total_payable,
-            description=f"Deposit via UTR: {order.transaction_id or 'None'}"
+            description=f"UPI Deposit Approved (Ref: {order.id})"
         )
         db.add(tx)
-        db.commit()
-
-        # Automatically check and pay any pending orders for target_user
-        await process_auto_pay_for_user(db, target_user)
         
         h1 = OrderStatusHistory(order_id=order.id, status="Manual Payment Approved")
         db.add(h1)
         h2 = OrderStatusHistory(order_id=order.id, status="Completed")
         db.add(h2)
         
-        # Log to OrderNote
-        admin_info = f"@{user.username} ({user.telegram_id})" if user.username else f"{user.display_name} ({user.telegram_id})"
+        # Log to OrderNote & AuditLog
+        admin_info = f"{user.display_name} (@{user.username or 'admin'} - ID: {user.telegram_id})"
         note = OrderNote(
             order_id=order.id,
             admin_username=user.username or user.display_name or "admin",
-            note=f"Deposit approved by admin: {admin_info}"
+            note=f"Deposit approved by: {admin_info}"
         )
         db.add(note)
         
-        admin_username = username or first_name or "Admin"
         audit = AuditLog(admin_id=user.id, action="WALLET_TOPUP_APPROVED", details=json.dumps({
             "order_id": order.id,
             "utr": order.transaction_id,
             "amount": order.total_payable,
             "user_id": target_user.id,
-            "admin": admin_username
+            "admin": admin_info
         }))
         db.add(audit)
         db.commit()
         
+        # Save persistence state snapshot
+        auto_save_persistent_db_state(db)
+
+        # Automatically check and pay any pending orders for target_user
+        await process_auto_pay_for_user(db, target_user)
+        
         # Notify user via bot
         success_text = (
-            f"💳 <b>Wallet Top-up Approved!</b>\n\n"
-            f"We verified your payment of <b>₹{order.total_payable:.2f}</b> (Ref: <code>{order.id}</code>).\n\n"
-            f"💰 <b>Your New Wallet Balance:</b> <b>₹{target_user.wallet_balance:.2f}</b>"
+            f"🎉 <b>Wallet Deposit Approved!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Your deposit of <b>₹{order.total_payable:.2f}</b> (Ref: <code>{order.id}</code>) has been verified & approved!\n\n"
+            f"💰 <b>Your New Wallet Balance:</b> <b>₹{target_user.wallet_balance:.2f}</b>\n\n"
+            f"You can now order delicious pizzas! 🍕"
         )
-        await send_bot_message(target_user.telegram_id, success_text)
+        user_markup = {
+            "inline_keyboard": [
+                [{"text": "🍕 Order Now", "callback_data": "menu_view"}, {"text": "💰 View Wallet", "callback_data": "wallet_view"}]
+            ]
+        }
+        await send_bot_message(target_user.telegram_id, success_text, reply_markup=user_markup)
         await answer_callback_query(callback_query_id, "Deposit Approved!")
         
         # Update admin message
         approved_text = (
-            f"✅ <b>Deposit Request Approved!</b>\n\n"
-            f"👤 <b>User:</b> {target_user.display_name} (ID: {target_user.telegram_id})\n"
+            f"✅ <b>Deposit Request Approved!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👤 <b>User:</b> {target_user.display_name} (ID: <code>{target_user.telegram_id}</code>)\n"
             f"💰 <b>Amount:</b> ₹{order.total_payable:.2f}\n"
             f"🆔 <b>Ref ID:</b> <code>{order.id}</code>\n"
             f"🔢 <b>UTR:</b> <code>{order.transaction_id or 'None'}</code>\n\n"
-            f"Processed by: <b>@{admin_username}</b>"
+            f"👮 <b>Approved By Admin:</b> {admin_info}"
         )
-        # Render back to control center
-        await edit_bot_message(user.telegram_id, message_id, approved_text, reply_markup={"inline_keyboard": [[{"text": "🔙 Back", "callback_data": "admin_refresh_stats"}]]})
+        await edit_bot_message(user.telegram_id, message_id, approved_text, reply_markup={"inline_keyboard": [[{"text": "🔙 Back to Payment Management", "callback_data": "admin_payment_management"}]]})
         
         if sse_broadcast_callback:
             try:
@@ -6672,7 +6679,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         if not order:
             await answer_callback_query(callback_query_id, "Deposit not found!")
             return
-        if order.status == "Rejected" or order.status == "Cancelled":
+        if order.status in ["Completed", "Approved", "Paid"]:
+            await answer_callback_query(callback_query_id, "⚠️ Deposit already approved! An approved deposit cannot be rejected.", show_alert=True)
+            return
+        if order.status in ["Rejected", "Cancelled"]:
             await answer_callback_query(callback_query_id, "Already rejected/cancelled!")
             return
             

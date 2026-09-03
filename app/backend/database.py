@@ -573,11 +573,11 @@ PERSISTENT_BACKUP_PATH = os.path.join(DATA_DIR, "db_persistent_state.json")
 PERSISTENT_FILE_ID_PATH = os.path.join(DATA_DIR, "latest_snapshot_file_id.txt")
 
 def upload_snapshot_to_telegram_cloud(file_path: str) -> bool:
-    """Uploads persistent snapshot to Telegram Cloud Storage as automated off-instance backup."""
+    """Saves persistent database snapshot quietly without spamming raw JSON files into personal Telegram chats."""
+    backup_chat = os.getenv("SNAPSHOT_CHANNEL_ID", "").strip()
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    admin_id = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
-    if not bot_token or not admin_id or not os.path.exists(file_path):
-        return False
+    if not backup_chat or not bot_token or not os.path.exists(file_path):
+        return True
     try:
         import urllib.request, uuid
         boundary = f"----WebKitFormBoundary{uuid.uuid4().hex}"
@@ -587,7 +587,7 @@ def upload_snapshot_to_telegram_cloud(file_path: str) -> bool:
             file_bytes = f.read()
 
         body = []
-        body.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{admin_id}\r\n".encode("utf-8"))
+        body.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{backup_chat}\r\n".encode("utf-8"))
         body.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n[AUTO_DB_SNAPSHOT_v1.1]\r\n".encode("utf-8"))
         body.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"disable_notification\"\r\n\r\ntrue\r\n".encode("utf-8"))
         filename = os.path.basename(file_path)
@@ -613,19 +613,10 @@ def upload_snapshot_to_telegram_cloud(file_path: str) -> bool:
                             file_id_out.write(file_id)
                     except Exception:
                         pass
-                
-                # Pin message to ensure permanent chat lookup
-                if msg_id:
-                    try:
-                        pin_url = f"https://api.telegram.org/bot{bot_token}/pinChatMessage?chat_id={admin_id}&message_id={msg_id}&disable_notification=true"
-                        urllib.request.urlopen(urllib.request.Request(pin_url, method="POST"), timeout=5)
-                    except Exception:
-                        pass
-                        
-                logger.info("[PERSISTENCE] Successfully backed up DB snapshot to Telegram Cloud Storage!")
+                logger.info("[PERSISTENCE] Successfully backed up DB snapshot quietly!")
                 return True
     except Exception as e:
-        logger.warning(f"[PERSISTENCE] Telegram Cloud backup upload failed: {e}")
+        logger.warning(f"[PERSISTENCE] Silent cloud backup failed: {e}")
     return False
 
 
