@@ -527,7 +527,10 @@ def render_wallet_view(db: Session, user: User, offset: int = 0, limit: int = 5)
     inline_buttons = [
         [
             {"text": "💳 Add Funds", "callback_data": "wallet_add"},
-            {"text": "🎫 Add Promo Code", "callback_data": "wallet_promo"}
+            {"text": "🎫 Add Promo", "callback_data": "wallet_promo"}
+        ],
+        [
+            {"text": "📜 Transaction History", "callback_data": "wallet_tx_history_page_1"}
         ]
     ]
 
@@ -539,7 +542,6 @@ def render_wallet_view(db: Session, user: User, offset: int = 0, limit: int = 5)
     if nav_row:
         inline_buttons.append(nav_row)
 
-    inline_buttons.append([{"text": "🛒 Back to Cart", "callback_data": "cart_view"}])
     inline_buttons.append([{"text": "🍕 View Menu & Order", "callback_data": "menu_view"}])
 
     return wallet_text, {"inline_keyboard": inline_buttons}
@@ -1284,6 +1286,119 @@ async def sync_user_profile_photo(telegram_id: str, user_db_id: str):
         logger.error(f"[Warning] Failed to sync profile photo for {telegram_id}: {e}")
     finally:
         db.close()
+
+
+async def process_auto_pay_for_user(db: Session, target_user: User):
+    """Checks for pending orders for user and auto-pays them if wallet balance is sufficient."""
+    try:
+        pending_orders = db.query(Order).filter(
+            Order.user_id == target_user.id,
+            Order.status == "Pending Payment",
+            ~Order.id.like("TOPUP-%")
+        ).order_by(Order.created_at.asc()).all()
+
+        for pending_order in pending_orders:
+            if target_user.wallet_balance >= pending_order.total_payable:
+                target_user.wallet_balance -= pending_order.total_payable
+                
+                tx = WalletTransaction(
+                    user_id=target_user.id,
+                    type="payment",
+                    amount=-pending_order.total_payable,
+                    description=f"Auto-payment for pending order: {pending_order.id}"
+                )
+                db.add(tx)
+                
+                h1 = OrderStatusHistory(order_id=pending_order.id, status="Payment Received", note="Auto-paid from approved wallet deposit")
+                db.add(h1)
+                h2 = OrderStatusHistory(order_id=pending_order.id, status="Order Processing", note="Queued for Domino's processing")
+                db.add(h2)
+                pending_order.status = "Order Processing"
+                db.commit()
+                
+                auto_msg = (
+                    f"🎉 <b>Pending Order Auto-Paid & Activated!</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"Your deposit was approved and your pending order <code>{pending_order.id}</code> (<b>₹{pending_order.total_payable:.2f}</b>) has been automatically paid from your wallet balance!\n\n"
+                    f"💰 <b>Remaining Wallet Balance:</b> ₹{target_user.wallet_balance:.2f}\n"
+                    f"🍕 Status: <b>Order Processing</b>"
+                )
+                await send_bot_message(target_user.telegram_id, auto_msg)
+                
+                admin_auto_text = (
+                    f"🔔 <b>Pending Order Auto-Paid & Activated!</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"🆔 <b>Order ID:</b> <code>{pending_order.id}</code>\n"
+                    f"👤 <b>Customer:</b> {target_user.display_name} (ID: <code>{target_user.telegram_id}</code>)\n"
+                    f"💰 <b>Amount Paid:</b> ₹{pending_order.total_payable:.2f}\n"
+                    f"🏡 <b>Address:</b> <code>{pending_order.address or 'N/A'}</code>"
+                )
+                await notify_admins(db, admin_auto_text)
+    except Exception as e:
+        logger.error(f"Error in process_auto_pay_for_user: {e}")
+
+
+def render_admin_command_center(db: Session) -> tuple[str, dict]:
+    """Generates the unified admin command center dashboard text and inline keyboard markup."""
+    func = sql_func
+    total_users = db.query(DbUser).count()
+    today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    total_orders = db.query(Order).count()
+    today_orders = db.query(Order).filter(Order.created_at >= today_start).count()
+    today_completed_orders = db.query(Order).filter(
+        Order.status == "Completed",
+        Order.created_at >= today_start
+    ).all()
+    today_revenue = sum(o.total_payable for o in today_completed_orders)
+    total_wallets = db.query(func.sum(DbUser.wallet_balance)).scalar() or 0.0
+    pending_orders_count = db.query(Order).filter(Order.status.in_(["Paid", "Pending Payment", "Pending Verification", "Order Processing"]), ~Order.id.like("TOPUP-%")).count()
+    pending_deposits_count = db.query(Order).filter(Order.id.like("TOPUP-%"), Order.status == "Pending Verification").count()
+    
+    maint_cfg = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
+    maint_val = maint_cfg.value if maint_cfg else "false"
+    maint_status = "⚠️ MAINTENANCE ON" if maint_val == "true" else "🟢 ONLINE"
+
+    admin_dashboard_text = (
+        f"🤖 <b>Platform Admin Command Center</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🛠️ <b>Platform Status:</b> <code>{maint_status}</code>\n"
+        f"👥 <b>Total Registered Users:</b> <code>{total_users}</code>\n"
+        f"💳 <b>Total Wallet Holdings:</b> <code>₹{total_wallets:.2f}</code>\n\n"
+        f"📊 <b>Orders Overview:</b>\n"
+        f"• Total Orders placed: <code>{total_orders}</code>\n"
+        f"• Orders Today: <code>{today_orders}</code>\n"
+        f"• Revenue Today: <b>₹{today_revenue:.2f}</b>\n\n"
+        f"⚠️ <b>Action Needed:</b>\n"
+        f"• Pending Orders: <b>{pending_orders_count}</b>\n"
+        f"• Pending Deposits: <b>{pending_deposits_count}</b>\n\n"
+        f"<i>Use the control panel options below to approve actions manually:</i>"
+    )
+
+    admin_inline_markup = {
+        "inline_keyboard": [
+            [
+                {"text": "📊 Refresh Stats", "callback_data": "admin_refresh_stats"},
+                {"text": "📦 Pending Orders", "callback_data": "admin_view_pending_orders"}
+            ],
+            [
+                {"text": "🛒 Manage Orders", "callback_data": "admin_manage_orders_menu"},
+                {"text": "🏦 Payment Management", "callback_data": "admin_payment_management"}
+            ],
+            [
+                {"text": "👥 Manage Users", "callback_data": "admin_manage_users"},
+                {"text": "🎟️ Manage Promo Codes", "callback_data": "admin_promo_menu"}
+            ],
+            [
+                {"text": "⚙️ System Config", "callback_data": "admin_sys_config"},
+                {"text": "📢 Broadcast Message", "callback_data": "admin_broadcast_menu"}
+            ],
+            [
+                {"text": "📊 Reports & Backup", "callback_data": "admin_reports_menu"},
+                {"text": "⚠️ View Error Logs", "callback_data": "admin_view_error_logs"}
+            ]
+        ]
+    }
+    return admin_dashboard_text, admin_inline_markup
 
 
 def render_order_confirmation_screen(db: Session, user: User, session: dict) -> tuple[str, dict]:
@@ -2734,6 +2849,79 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         await send_bot_message(user.telegram_id, msg, reply_markup={"inline_keyboard": buttons})
         return
 
+    elif session.get("state") == "admin_waiting_broadcast_all_text":
+        if not is_admin:
+            await send_bot_message(user.telegram_id, "❌ Unauthorized!")
+            return
+        session["temp_broadcast_text"] = text
+        session["state"] = None
+        
+        all_count = db.query(DbUser).filter(DbUser.telegram_id.isnot(None)).count()
+        preview_text = (
+            f"📢 <b>Broadcast Preview ({all_count} users target):</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"{text}\n\n"
+            f"<i>Tap below to confirm and send broadcast to all registered users:</i>"
+        )
+        buttons = [
+            [{"text": "✅ Confirm & Send Broadcast", "callback_data": "admin_broadcast_all_confirm"}],
+            [{"text": "❌ Cancel", "callback_data": "admin_refresh_stats"}]
+        ]
+        await send_bot_message(user.telegram_id, preview_text, reply_markup={"inline_keyboard": buttons})
+        return
+
+    elif session.get("state") == "admin_waiting_direct_user":
+        if not is_admin:
+            await send_bot_message(user.telegram_id, "❌ Unauthorized!")
+            return
+        query_val = text_clean.lstrip("@").strip()
+        target_u = db.query(DbUser).filter(
+            (DbUser.telegram_id == query_val) |
+            (DbUser.username.ilike(query_val)) |
+            (DbUser.display_name.ilike(f"%{query_val}%")) |
+            (DbUser.id == query_val)
+        ).first()
+        
+        if not target_u:
+            await send_bot_message(user.telegram_id, "❌ Target user not found. Please try entering Telegram ID or Username again:")
+            return
+            
+        session["target_direct_user_id"] = target_u.id
+        session["state"] = "admin_waiting_direct_text"
+        await send_bot_message(
+            user.telegram_id,
+            f"💬 <b>Direct Messaging:</b> <b>{target_u.display_name}</b> (ID: <code>{target_u.telegram_id}</code>)\n\n"
+            f"Please type the message you want to send directly to this user:",
+            reply_markup={"keyboard": [[{"text": "❌ Cancel"}]], "resize_keyboard": True, "one_time_keyboard": True}
+        )
+        return
+
+    elif session.get("state") == "admin_waiting_direct_text":
+        if not is_admin:
+            await send_bot_message(user.telegram_id, "❌ Unauthorized!")
+            return
+        target_id = session.get("target_direct_user_id")
+        target_u = db.query(DbUser).filter(DbUser.id == target_id).first()
+        if not target_u:
+            await send_bot_message(user.telegram_id, "❌ Target user lost. Action cancelled.")
+            session["state"] = None
+            return
+            
+        direct_msg = (
+            f"💬 <b>Direct Message from Platform Admin:</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"{text}"
+        )
+        ok = await send_bot_message(target_u.telegram_id, direct_msg)
+        session["state"] = None
+        session["target_direct_user_id"] = None
+        
+        if ok:
+            await send_bot_message(user.telegram_id, f"✅ <b>Message sent successfully to {target_u.display_name}!</b>", reply_markup=main_keyboard)
+        else:
+            await send_bot_message(user.telegram_id, f"❌ Failed to send message to {target_u.display_name} (User may have blocked the bot).", reply_markup=main_keyboard)
+        return
+
     elif session.get("state") == "admin_waiting_upi_id":
         if not is_admin:
             await send_bot_message(user.telegram_id, "❌ Unauthorized!")
@@ -3444,64 +3632,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
 
         func = sql_func
 
-        total_users = db.query(DbUser).count()
-        today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        total_orders = db.query(Order).count()
-        today_orders = db.query(Order).filter(Order.created_at >= today_start).count()
-        
-        today_completed_orders = db.query(Order).filter(
-            Order.status == "Completed",
-            Order.created_at >= today_start
-        ).all()
-        today_revenue = sum(o.total_payable for o in today_completed_orders)
-        
-        total_wallets = db.query(func.sum(DbUser.wallet_balance)).scalar() or 0.0
-        pending_orders_count = db.query(Order).filter(Order.status.in_(["Paid", "Pending Payment", "Order Processing"]), ~Order.id.like("TOPUP-%")).count()
-        pending_deposits_count = db.query(Order).filter(Order.id.like("TOPUP-%"), Order.status == "Pending Verification").count()
-        
-        maint_cfg = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
-        maint_val = maint_cfg.value if maint_cfg else "false"
-        maint_status = "⚠️ MAINTENANCE ON" if maint_val == "true" else "🟢 ONLINE"
-
-        admin_dashboard_text = (
-            f"🤖 <b>Platform Admin Command Center</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🛠️ <b>Platform Status:</b> <code>{maint_status}</code>\n"
-            f"👥 <b>Total Registered Users:</b> <code>{total_users}</code>\n"
-            f"💳 <b>Total Wallet Holdings:</b> <code>₹{total_wallets:.2f}</code>\n\n"
-            f"📊 <b>Orders Overview:</b>\n"
-            f"• Total Orders placed: <code>{total_orders}</code>\n"
-            f"• Orders Today: <code>{today_orders}</code>\n"
-            f"• Revenue Today: <b>₹{today_revenue:.2f}</b>\n\n"
-            f"⚠️ <b>Action Needed:</b>\n"
-            f"• Pending Orders: <b>{pending_orders_count}</b>\n"
-            f"• Pending Deposits: <b>{pending_deposits_count}</b>\n\n"
-            f"<i>Use the control panel options below to approve actions manually:</i>"
-        )
-
-        admin_inline_markup = {
-            "inline_keyboard": [
-                [
-                    {"text": "📊 Refresh Stats", "callback_data": "admin_refresh_stats"},
-                    {"text": "📦 Pending Orders", "callback_data": "admin_view_pending_orders"}
-                ],
-                [
-                    {"text": "🎟️ Manage Promo Codes", "callback_data": "admin_promo_menu"},
-                    {"text": "👥 Manage Users", "callback_data": "admin_manage_users"}
-                ],
-                [
-                    {"text": "⚙️ System Config", "callback_data": "admin_sys_config"},
-                    {"text": "📊 Reports & Backup", "callback_data": "admin_reports_menu"}
-                ],
-                [
-                    {"text": "🏦 Pending Deposits", "callback_data": "admin_view_pending_deposits"}
-                ],
-                [
-                    {"text": "⚠️ View Error Logs", "callback_data": "admin_view_error_logs"}
-                ]
-            ]
-        }
-
+        admin_dashboard_text, admin_inline_markup = render_admin_command_center(db)
         await send_bot_message(user.telegram_id, admin_dashboard_text, reply_markup=admin_inline_markup)
         return
 
@@ -4917,6 +5048,50 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await edit_bot_message(user.telegram_id, message_id, wallet_text, wallet_markup)
         await answer_callback_query(callback_query_id)
 
+    elif data.startswith("wallet_tx_history_page_"):
+        page = int(data.replace("wallet_tx_history_page_", "").strip())
+        limit = 5
+        offset = (page - 1) * limit
+        
+        query = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id)
+        total_count = query.count()
+        total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
+        page = max(1, min(page, total_pages))
+        
+        txs = query.order_by(WalletTransaction.created_at.desc()).offset(offset).limit(limit).all()
+        
+        msg = f"📜 <b>Your Transaction History (Page {page}/{total_pages}):</b>\n\n"
+        for t in txs:
+            sign = "+" if t.amount >= 0 else ""
+            t_type = t.type.upper()
+            _ist_time = t.created_at + datetime.timedelta(hours=5, minutes=30) if t.created_at else None
+            date_str = _ist_time.strftime("%d %b %Y, %I:%M %p") if _ist_time else "—"
+            
+            icon = "🟢" if t.amount >= 0 else "🔴"
+            msg += (
+                f"{icon} <b>{sign}₹{abs(t.amount):.2f}</b> — <b>{t_type}</b>\n"
+                f"  └ Ref: <code>{t.id[:10].upper()}</code>\n"
+                f"  └ Details: <i>{t.description or 'Wallet transaction'}</i>\n"
+                f"  └ Date: {date_str}\n\n"
+            )
+            
+        if not txs:
+            msg += "<i>No transaction history recorded yet.</i>\n"
+            
+        buttons = []
+        nav_row = []
+        if page > 1:
+            nav_row.append({"text": "⬅️ Prev", "callback_data": f"wallet_tx_history_page_{page-1}"})
+        if page < total_pages:
+            nav_row.append({"text": "Next ➡️", "callback_data": f"wallet_tx_history_page_{page+1}"})
+        if nav_row:
+            buttons.append(nav_row)
+        buttons.append([{"text": "🔙 Back to My Wallet", "callback_data": "wallet_view"}])
+        
+        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        await answer_callback_query(callback_query_id)
+        return
+
     elif data.startswith("pay_now_"):
         order_id = data.replace("pay_now_", "").strip()
         order = db.query(Order).filter(Order.id == order_id).first()
@@ -5164,12 +5339,31 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         
         deposits = query.order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
         
+        upi_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
+        active_upi_id = upi_cfg.value if upi_cfg else "pranjalottery@fam"
+        
         msg = f"📜 <b>Deposit Transaction History (Page {page}/{total_pages}):</b>\n\n"
         for d in deposits:
             status_emoji = "🟢" if d.status == "Completed" else "🟡" if d.status == "Pending Verification" else "🔴"
-            utr_lbl = f"UTR: {d.transaction_id}" if d.transaction_id else "No UTR"
-            date_str = d.created_at.strftime("%Y-%m-%d %H:%M") if d.created_at else "—"
-            msg += f"{status_emoji} <code>{d.id}</code> — <b>₹{d.total_payable:.2f}</b> ({d.status})\n  {utr_lbl} | {date_str}\n\n"
+            utr_lbl = d.transaction_id or "No UTR"
+            
+            _ist_time = d.created_at + datetime.timedelta(hours=5, minutes=30) if d.created_at else None
+            date_str = _ist_time.strftime("%d %b %Y, %I:%M %p IST") if _ist_time else "—"
+            
+            u_name = d.user.display_name if d.user else f"User_{d.user_id}"
+            u_tg = d.user.telegram_id if d.user else d.user_id
+            
+            note_rec = db.query(OrderNote).filter(OrderNote.order_id == d.id).order_by(OrderNote.created_at.desc()).first()
+            approved_by = note_rec.admin_username if note_rec else ("System Auto" if d.status == "Completed" else "—")
+            
+            msg += (
+                f"{status_emoji} <b>ID:</b> <code>{d.id}</code> — <b>₹{d.total_payable:.2f}</b>\n"
+                f"  👤 <b>User:</b> {u_name} (ID: <code>{u_tg}</code>)\n"
+                f"  💳 <b>UPI ID:</b> <code>{active_upi_id}</code> | 🔢 <b>UTR:</b> <code>{utr_lbl}</code>\n"
+                f"  👮 <b>Approved By:</b> <code>{approved_by}</code>\n"
+                f"  📅 <b>Date:</b> {date_str}\n"
+                f"  ━━━━━━━━━━━━━━━━━━━━━━\n"
+            )
             
         if not deposits:
             msg += "No deposit requests found.\n"
@@ -5211,63 +5405,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         if not is_admin:
             await answer_callback_query(callback_query_id, "Unauthorized!")
             return
-        func = sql_func
-
-        total_users = db.query(DbUser).count()
-        today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        total_orders = db.query(Order).count()
-        today_orders = db.query(Order).filter(Order.created_at >= today_start).count()
-        today_completed_orders = db.query(Order).filter(
-            Order.status == "Completed",
-            Order.created_at >= today_start
-        ).all()
-        today_revenue = sum(o.total_payable for o in today_completed_orders)
-        total_wallets = db.query(func.sum(DbUser.wallet_balance)).scalar() or 0.0
-        pending_orders_count = db.query(Order).filter(Order.status.in_(["Paid", "Pending Payment", "Order Processing"]), ~Order.id.like("TOPUP-%")).count()
-        pending_deposits_count = db.query(Order).filter(Order.id.like("TOPUP-%"), Order.status == "Pending Verification").count()
-        
-        maint_cfg = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
-        maint_val = maint_cfg.value if maint_cfg else "false"
-        maint_status = "⚠️ MAINTENANCE ON" if maint_val == "true" else "🟢 ONLINE"
-
-        admin_dashboard_text = (
-            f"🤖 <b>Platform Admin Command Center</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🛠️ <b>Platform Status:</b> <code>{maint_status}</code>\n"
-            f"👥 <b>Total Registered Users:</b> <code>{total_users}</code>\n"
-            f"💳 <b>Total Wallet Holdings:</b> <code>₹{total_wallets:.2f}</code>\n\n"
-            f"📊 <b>Orders Overview:</b>\n"
-            f"• Total Orders placed: <code>{total_orders}</code>\n"
-            f"• Orders Today: <code>{today_orders}</code>\n"
-            f"• Revenue Today: <b>₹{today_revenue:.2f}</b>\n\n"
-            f"⚠️ <b>Action Needed:</b>\n"
-            f"• Pending Orders: <b>{pending_orders_count}</b>\n"
-            f"• Pending Deposits: <b>{pending_deposits_count}</b>\n\n"
-            f"<i>Use the control panel options below to approve actions manually:</i>"
-        )
-        admin_inline_markup = {
-            "inline_keyboard": [
-                [
-                    {"text": "📊 Refresh Stats", "callback_data": "admin_refresh_stats"},
-                    {"text": "📦 Pending Orders", "callback_data": "admin_view_pending_orders"}
-                ],
-                [
-                    {"text": "🛒 Manage Orders", "callback_data": "admin_manage_orders_menu"},
-                    {"text": "👥 Manage Users", "callback_data": "admin_manage_users"}
-                ],
-                [
-                    {"text": "🎟️ Manage Promo Codes", "callback_data": "admin_promo_menu"},
-                    {"text": "⚙️ System Config", "callback_data": "admin_sys_config"}
-                ],
-                [
-                    {"text": "📊 Reports & Backup", "callback_data": "admin_reports_menu"},
-                    {"text": "🏦 Payment Management", "callback_data": "admin_payment_management"}
-                ],
-                [
-                    {"text": "⚠️ View Error Logs", "callback_data": "admin_view_error_logs"}
-                ]
-            ]
-        }
+        admin_dashboard_text, admin_inline_markup = render_admin_command_center(db)
         await edit_bot_message(user.telegram_id, message_id, admin_dashboard_text, reply_markup=admin_inline_markup)
         await answer_callback_query(callback_query_id, "Stats Refreshed!")
         return
@@ -5555,6 +5693,102 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             
         buttons = [[{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}]]
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data == "admin_broadcast_menu":
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+            
+        b_msg = (
+            "📢 <b>Admin Announcement & Direct Messaging Center</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Select an option below to broadcast a message to all users or message a specific user directly:"
+        )
+        b_buttons = [
+            [
+                {"text": "📢 Broadcast to ALL Users", "callback_data": "admin_broadcast_all_start"}
+            ],
+            [
+                {"text": "💬 Direct Message User", "callback_data": "admin_direct_msg_start"}
+            ],
+            [
+                {"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}
+            ]
+        ]
+        await edit_bot_message(user.telegram_id, message_id, b_msg, reply_markup={"inline_keyboard": b_buttons})
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data == "admin_broadcast_all_start":
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        session["state"] = "admin_waiting_broadcast_all_text"
+        cancel_markup = {
+            "keyboard": [[{"text": "❌ Cancel"}]],
+            "resize_keyboard": True,
+            "one_time_keyboard": True
+        }
+        await delete_bot_message(user.telegram_id, message_id)
+        await send_bot_message(
+            user.telegram_id,
+            "📢 <b>Broadcast Message to All Users</b>\n\nPlease type the broadcast message below to send to ALL registered users:\n\n<i>Supports HTML (e.g. <b>bold</b>, <i>italic</i>, <code>code</code>).</i>",
+            reply_markup=cancel_markup
+        )
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data == "admin_broadcast_all_confirm":
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        broadcast_text = session.get("temp_broadcast_text")
+        if not broadcast_text:
+            await answer_callback_query(callback_query_id, "No message found!")
+            return
+            
+        all_users = db.query(DbUser).filter(DbUser.telegram_id.isnot(None)).all()
+        sent_count = 0
+        fail_count = 0
+        
+        for target_u in all_users:
+            if target_u.telegram_id:
+                ok = await send_bot_message(target_u.telegram_id, f"📢 <b>Announcement from Admin:</b>\n\n{broadcast_text}")
+                if ok:
+                    sent_count += 1
+                else:
+                    fail_count += 1
+                    
+        session["state"] = None
+        session["temp_broadcast_text"] = None
+        
+        report_msg = (
+            f"✅ <b>Broadcast Completed!</b>\n\n"
+            f"• <b>Sent Successfully:</b> {sent_count} users\n"
+            f"• <b>Failed / Blocked:</b> {fail_count} users"
+        )
+        await edit_bot_message(user.telegram_id, message_id, report_msg, reply_markup={"inline_keyboard": [[{"text": "🔙 Back", "callback_data": "admin_refresh_stats"}]]})
+        await answer_callback_query(callback_query_id, "Broadcast Sent!")
+        return
+
+    elif data == "admin_direct_msg_start":
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        session["state"] = "admin_waiting_direct_user"
+        cancel_markup = {
+            "keyboard": [[{"text": "❌ Cancel"}]],
+            "resize_keyboard": True,
+            "one_time_keyboard": True
+        }
+        await delete_bot_message(user.telegram_id, message_id)
+        await send_bot_message(
+            user.telegram_id,
+            "💬 <b>Direct Message User</b>\n\nPlease enter the Username (e.g. <code>@name</code>), Display Name, or Telegram ID of the user you want to message:",
+            reply_markup=cancel_markup
+        )
         await answer_callback_query(callback_query_id)
         return
 

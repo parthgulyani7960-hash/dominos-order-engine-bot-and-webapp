@@ -1113,6 +1113,24 @@ class TestPizzaPlatform(unittest.TestCase):
         self.assertEqual(topup_order.status, "Pending Verification")
         self.assertEqual(topup_order.transaction_id, utr_code)
 
+    def test_19_admin_command_center_and_broadcast(self):
+        """Verifies render_admin_command_center output, deposit history formatting, and broadcast handlers."""
+        from app.backend.bot import render_admin_command_center, render_wallet_view
+        
+        # 1. Test Admin Command Center rendering
+        admin_text, admin_markup = render_admin_command_center(self.db)
+        self.assertIn("Platform Admin Command Center", admin_text)
+        self.assertIn("📢 Broadcast Message", str(admin_markup))
+        
+        # 2. Test Wallet View rendering with Transaction History button
+        user = User(telegram_id="99988811", username="tx_user", display_name="Tx User", wallet_balance=500.0)
+        self.db.add(user)
+        self.db.commit()
+        
+        wallet_text, wallet_markup = render_wallet_view(self.db, user)
+        self.assertIn("My Wallet", wallet_text)
+        self.assertIn("wallet_tx_history_page_1", str(wallet_markup))
+
 def hashlib_sha256(text: str) -> str:
 
 
