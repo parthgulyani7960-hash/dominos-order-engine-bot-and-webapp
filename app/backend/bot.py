@@ -1051,37 +1051,50 @@ def get_product_mappings(db: Session):
 async def display_delivery_location_menu(db: Session, user: User):
     session = USER_BOT_SESSION.setdefault(user.telegram_id, {"cart": {}, "state": None})
     session["state"] = "in_location_menu"
-    coord_line = ""
+    
+    # Pricing multiplier display for city
+    multiplier = 1.0
+    if user.city:
+        loc_pricing = db.query(LocationPricing).filter(LocationPricing.city.ilike(user.city)).first()
+        if loc_pricing:
+            multiplier = loc_pricing.price_multiplier
+            
+    city_disp = f"<b>{user.city or 'Not set'}</b> ({multiplier:.1f}x pricing)" if user.city else "<i>Not set</i>"
+    
     if user.latitude is not None and user.longitude is not None:
-        coord_line = f"\n📡 Coords: <code>{user.latitude:.4f}, {user.longitude:.4f}</code>"
+        coord_line = f"\n📡 <b>GPS Location:</b> <code>{user.latitude:.5f}, {user.longitude:.5f}</code>"
     else:
-        coord_line = f"\n📡 Coords: <i>No coordinates saved by you</i>"
+        coord_line = f"\n📡 <b>GPS Location:</b> <i>⚠️ No GPS coordinates saved</i>"
         
     saved_addr = db.query(SavedAddress).filter(SavedAddress.user_id == user.id).first()
     if saved_addr and saved_addr.full_address and saved_addr.full_address != "GPS Location":
-        addr_line = f"\n🏡 Address: <code>{saved_addr.full_address}</code>"
+        addr_line = f"\n🏠 <b>Doorstep Address:</b> <code>{saved_addr.full_address}</code>"
+    elif user.address and user.address != "GPS Location":
+        addr_line = f"\n🏠 <b>Doorstep Address:</b> <code>{user.address}</code>"
     else:
-        addr_line = f"\n🏡 Address: <i>No delivery address saved by you</i>"
+        addr_line = f"\n🏠 <b>Doorstep Address:</b> <i>⚠️ No doorstep address saved</i>"
         
     if user.phone:
-        phone_line = f"\n📱 Phone: <code>{user.phone}</code>"
+        phone_line = f"\n📱 <b>Phone Number:</b> <code>{user.phone}</code>"
     else:
-        phone_line = f"\n📱 Phone: <i>No phone number saved by you</i>"
+        phone_line = f"\n📱 <b>Phone Number:</b> <i>⚠️ No phone number saved</i>"
 
     loc_msg = (
         f"📍 <b>Delivery Location & Details</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Current city: <b>{user.city or '—'}</b>"
+        f"🏙️ <b>Delivery City:</b> {city_disp}"
         f"{coord_line}"
         f"{addr_line}"
         f"{phone_line}\n\n"
-        "Choose an option below:"
+        "<i>Note: Your GPS coordinates, written doorstep address, and city region are stored separately for accurate Domino's delivery.</i>\n\n"
+        "Choose an option below to update any setting:"
     )
     
     loc_options_keyboard = {
         "keyboard": [
             [{"text": "📍 Share My GPS Location", "request_location": True}],
             [{"text": "🏠 Update Delivery Address"}],
+            [{"text": "🏙️ Change City / Area"}],
             [{"text": "📱 Update Phone Number"}],
             [{"text": "🔙 Back"}]
         ],
@@ -1915,7 +1928,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             db.add(saved_addr)
             
         if not has_doorstep:
-            saved_addr.full_address = "GPS Location"
+            saved_addr.full_address = city if (city and city != "GPS Location") else (user.address or "")
             
         saved_addr.latitude = lat
         saved_addr.longitude = lon
@@ -2221,10 +2234,45 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 await notify_admins(db, admin_text, reply_markup=action_markup)
             return
 
-    if session.get("state") in ("waiting_for_city", "in_location_menu"):
+    if text_clean in ("🏙️ Change City / Area", "change city"):
+        session["state"] = "waiting_for_city"
+        await send_bot_message(
+            user.telegram_id,
+            "🏙️ <b>Change Delivery City / Area</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Current city: <b>{user.city or 'Not set'}</b>\n\n"
+            "Please type your new city or area name (e.g. <code>Mumbai</code>, <code>Delhi</code>, <code>Bangalore</code>):\n\n"
+            "<i>Store pricing and menu selection will update automatically for your selected city.</i>",
+            reply_markup={"keyboard": [[{"text": "📍 Share My GPS Location", "request_location": True}], [{"text": "❌ Cancel"}]], "resize_keyboard": True, "one_time_keyboard": True}
+        )
+        return
+
+    if text_clean in ("🏠 Update Delivery Address", "update delivery address"):
+        session["state"] = "waiting_for_address_update"
+        city_line = f"📍 <b>City:</b> {user.city}\n" if user.city else ""
+        await send_bot_message(
+            user.telegram_id,
+            f"🏠 <b>Update Doorstep Delivery Address</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n{city_line}"
+            "Please type your full doorstep delivery address below (e.g. <code>Flat 402, Sunshine Apartments, MG Road</code>):\n\n"
+            "<i>Note: Your GPS coordinates and city pricing remain saved separately.</i>",
+            reply_markup={"keyboard": [[{"text": "❌ Cancel"}]], "resize_keyboard": True, "one_time_keyboard": True}
+        )
+        return
+
+    if text_clean in ("📱 Update Phone Number", "update phone number"):
+        session["state"] = "waiting_for_phone_update"
+        current_phone = f"Current phone: <code>{user.phone}</code>\n\n" if user.phone else ""
+        await send_bot_message(
+            user.telegram_id,
+            f"📱 <b>Update Phone Number</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n{current_phone}"
+            "Please type your contact mobile number (e.g. <code>+919876543210</code>):",
+            reply_markup={"keyboard": [[{"text": "❌ Cancel"}]], "resize_keyboard": True, "one_time_keyboard": True}
+        )
+        return
+
+    if session.get("state") == "waiting_for_city":
         city_buttons = [
             "❌ skip location", "🍕 view menu", "💰 my wallet", "📦 track orders",
-            "📍 change location", "❌ cancel", "🏠 update delivery address", "📱 update phone number", "🔙 back"
+            "📍 change location", "❌ cancel", "🏠 update delivery address", "📱 update phone number", "🏙️ change city / area", "🔙 back"
         ]
         if text and text.strip().lower() in city_buttons:
             pass  # Fall through to main button routing
@@ -2480,7 +2528,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
 
 
 
-    if session.get("state") == "waiting_for_address":
+    if session.get("state") in ("waiting_for_address", "waiting_for_address_update"):
         addr_stripped = text.strip() if text else ""
         
         # Check if the input looks like GPS coordinates: e.g. "19.0760, 72.8777"

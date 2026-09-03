@@ -1,9 +1,9 @@
 {
   "version": 1.1,
-  "saved_at": "2026-09-03T16:48:37.745384+00:00",
+  "saved_at": "2026-09-03T17:06:52.029880+00:00",
   "users": [
     {
-      "id": "6d989a2c-45d6-4ca4-9065-6713018eb31c",
+      "id": "16b79d93-810a-40a1-89f3-8a1a708bae9c",
       "telegram_id": "111222",
       "username": "admin",
       "display_name": "Super Admin",
@@ -17,24 +17,39 @@
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-03T16:48:37.707036"
-    }
-  ],
-  "saved_addresses": [],
-  "orders": [
+      "created_at": "2026-09-03T17:06:50.999059"
+    },
     {
-      "id": "BOT-TESTQR1",
-      "user_id": "6d989a2c-45d6-4ca4-9065-6713018eb31c",
-      "total_payable": 330.0,
-      "status": "Pending Verification",
-      "payment_method": "direct_upi",
-      "address": "123 Pizza Street, Mumbai",
-      "phone": "9876543210",
-      "dominos_reference": null,
-      "transaction_id": "REF-TESTQR1",
-      "created_at": "2026-09-03T16:48:37.725634"
+      "id": "67b37f77-50fd-4265-9f38-62555626e087",
+      "telegram_id": "999000111",
+      "username": "loc_user",
+      "display_name": "Loc User",
+      "phone": null,
+      "city": "Mumbai",
+      "address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "wallet_balance": 0.0,
+      "is_admin": false,
+      "bot_state": null,
+      "bot_cart": null,
+      "telegram_verified": false,
+      "created_at": "2026-09-03T17:06:51.009517"
     }
   ],
+  "saved_addresses": [
+    {
+      "id": "3f6d500c-0449-4472-b0b3-e0191249513b",
+      "user_id": "67b37f77-50fd-4265-9f38-62555626e087",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    }
+  ],
+  "orders": [],
   "wallet_transactions": [],
   "coupons": []
 }
