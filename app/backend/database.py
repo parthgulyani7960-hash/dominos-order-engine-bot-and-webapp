@@ -11,8 +11,12 @@ Design:
 from __future__ import annotations
 
 import datetime
+import json
+import logging
 import os
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Float, ForeignKey,
@@ -120,6 +124,13 @@ class User(TimestampMixin, Base):
                                     foreign_keys="[GiftCard.used_by_user_id]")
     saved_addresses = relationship("SavedAddress",  back_populates="user", cascade="all, delete-orphan")
     notifications   = relationship("Notification",  back_populates="user", cascade="all, delete-orphan")
+
+    @property
+    def address(self) -> str | None:
+        if self.saved_addresses:
+            default_addr = next((sa for sa in self.saved_addresses if sa.is_default), self.saved_addresses[0])
+            return default_addr.full_address if default_addr else None
+        return None
 
     __table_args__ = (
         Index("ix_users_role_created", "role", "created_at"),
@@ -561,7 +572,7 @@ class WithdrawalRequest(TimestampMixin, Base):
 PERSISTENT_BACKUP_PATH = os.path.join(DATA_DIR, "db_persistent_state.json")
 
 def auto_save_persistent_db_state(db=None) -> bool:
-    """Saves non-volatile user balances, orders, and state to a persistent JSON snapshot."""
+    """Saves non-volatile user balances, addresses, orders, wallet transactions, and coupons to a persistent JSON snapshot."""
     close_after = False
     if db is None:
         db = SessionLocal()
@@ -569,25 +580,41 @@ def auto_save_persistent_db_state(db=None) -> bool:
     try:
         users = db.query(User).all()
         orders = db.query(Order).all()
+        saved_addresses = db.query(SavedAddress).all()
+        txs = db.query(WalletTransaction).all()
+        coupons = db.query(Coupon).all()
         
         users_data = []
         for u in users:
             users_data.append({
                 "id": u.id,
                 "telegram_id": u.telegram_id,
-                "first_name": u.first_name,
-                "last_name": u.last_name,
                 "username": u.username,
                 "display_name": u.display_name,
                 "phone": u.phone,
                 "city": u.city,
-                "address": u.address,
+                "address": u.saved_addresses[0].full_address if u.saved_addresses else None,
+                "latitude": float(u.latitude) if u.latitude is not None else None,
+                "longitude": float(u.longitude) if u.longitude is not None else None,
                 "wallet_balance": float(u.wallet_balance or 0.0),
-                "is_admin": bool(u.is_admin),
+                "is_admin": (u.role == "admin"),
                 "bot_state": u.bot_state,
                 "bot_cart": u.bot_cart,
                 "telegram_verified": bool(u.telegram_verified),
                 "created_at": u.created_at.isoformat() if u.created_at else None,
+            })
+
+        addresses_data = []
+        for sa in saved_addresses:
+            addresses_data.append({
+                "id": sa.id,
+                "user_id": sa.user_id,
+                "label": sa.label,
+                "full_address": sa.full_address,
+                "latitude": float(sa.latitude) if sa.latitude is not None else None,
+                "longitude": float(sa.longitude) if sa.longitude is not None else None,
+                "city": sa.city,
+                "is_default": bool(sa.is_default),
             })
 
         orders_data = []
@@ -600,16 +627,41 @@ def auto_save_persistent_db_state(db=None) -> bool:
                 "payment_method": o.payment_method,
                 "address": o.address,
                 "phone": o.phone,
-                "dominos_order_id": o.dominos_order_id,
+                "dominos_reference": getattr(o, "dominos_reference", None),
                 "transaction_id": o.transaction_id,
                 "created_at": o.created_at.isoformat() if o.created_at else None,
             })
 
+        tx_data = []
+        for t in txs:
+            tx_data.append({
+                "id": t.id,
+                "user_id": t.user_id,
+                "type": t.type,
+                "amount": float(t.amount or 0.0),
+                "description": t.description,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            })
+
+        coupons_data = []
+        for c in coupons:
+            coupons_data.append({
+                "id": c.id,
+                "code": c.code,
+                "value": float(c.value or 0.0),
+                "usage_limit": c.usage_limit,
+                "redeemed_count": c.redeemed_count,
+                "is_active": bool(c.is_active),
+            })
+
         data = {
-            "version": 1.0,
+            "version": 1.1,
             "saved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "users": users_data,
+            "saved_addresses": addresses_data,
             "orders": orders_data,
+            "wallet_transactions": tx_data,
+            "coupons": coupons_data,
         }
 
         with open(PERSISTENT_BACKUP_PATH, "w", encoding="utf-8") as f:
@@ -624,7 +676,7 @@ def auto_save_persistent_db_state(db=None) -> bool:
 
 
 def auto_restore_persistent_db_state(db) -> bool:
-    """Restores user accounts, wallet balances, and orders if the database file was reset or replaced on deployment."""
+    """Restores user accounts, wallet balances, saved addresses, orders, transactions, and coupons if the database file was reset or replaced on deployment."""
     if not os.path.exists(PERSISTENT_BACKUP_PATH):
         return False
     try:
@@ -641,15 +693,15 @@ def auto_restore_persistent_db_state(db) -> bool:
                 u = User(
                     id=u_data["id"],
                     telegram_id=tg_id,
-                    first_name=u_data.get("first_name"),
-                    last_name=u_data.get("last_name"),
                     username=u_data.get("username"),
                     display_name=u_data.get("display_name"),
                     phone=u_data.get("phone"),
                     city=u_data.get("city", "India"),
                     address=u_data.get("address"),
+                    latitude=u_data.get("latitude"),
+                    longitude=u_data.get("longitude"),
                     wallet_balance=float(u_data.get("wallet_balance", 0.0)),
-                    is_admin=bool(u_data.get("is_admin", False)),
+                    role="admin" if bool(u_data.get("is_admin", False)) else "user",
                     bot_state=u_data.get("bot_state"),
                     bot_cart=u_data.get("bot_cart"),
                     telegram_verified=bool(u_data.get("telegram_verified", False))
@@ -657,10 +709,34 @@ def auto_restore_persistent_db_state(db) -> bool:
                 db.add(u)
                 restored_users += 1
             else:
-                # Synchronize wallet balance if higher in backup file
+                # Synchronize details if higher or missing in existing record
                 b_bal = float(u_data.get("wallet_balance", 0.0))
                 if b_bal > existing.wallet_balance:
                     existing.wallet_balance = b_bal
+                if not existing.address and u_data.get("address"):
+                    existing.address = u_data.get("address")
+                if not existing.phone and u_data.get("phone"):
+                    existing.phone = u_data.get("phone")
+                if existing.latitude is None and u_data.get("latitude") is not None:
+                    existing.latitude = u_data.get("latitude")
+                    existing.longitude = u_data.get("longitude")
+
+        restored_addrs = 0
+        for sa_data in data.get("saved_addresses", []):
+            existing_sa = db.query(SavedAddress).filter(SavedAddress.id == sa_data["id"]).first()
+            if not existing_sa:
+                sa = SavedAddress(
+                    id=sa_data["id"],
+                    user_id=sa_data["user_id"],
+                    label=sa_data.get("label", "Home"),
+                    full_address=sa_data.get("full_address"),
+                    latitude=sa_data.get("latitude"),
+                    longitude=sa_data.get("longitude"),
+                    city=sa_data.get("city"),
+                    is_default=bool(sa_data.get("is_default", True))
+                )
+                db.add(sa)
+                restored_addrs += 1
 
         restored_orders = 0
         for o_data in data.get("orders", []):
@@ -669,20 +745,46 @@ def auto_restore_persistent_db_state(db) -> bool:
                 o = Order(
                     id=o_data["id"],
                     user_id=o_data["user_id"],
+                    original_total=float(o_data.get("original_total") or o_data.get("total_payable", 0.0)),
                     total_payable=float(o_data.get("total_payable", 0.0)),
                     status=o_data.get("status", "Pending"),
                     payment_method=o_data.get("payment_method", "wallet"),
                     address=o_data.get("address"),
                     phone=o_data.get("phone"),
-                    dominos_order_id=o_data.get("dominos_order_id"),
-                    transaction_id=o_data.get("transaction_id")
+                    dominos_reference=o_data.get("dominos_reference") or o_data.get("dominos_order_id"),
+                    transaction_id=o_data.get("transaction_id", f"TXN-{uuid.uuid4().hex[:10].upper()}")
                 )
                 db.add(o)
                 restored_orders += 1
 
+        for tx_rec in data.get("wallet_transactions", []):
+            existing_tx = db.query(WalletTransaction).filter(WalletTransaction.id == tx_rec["id"]).first()
+            if not existing_tx:
+                t = WalletTransaction(
+                    id=tx_rec["id"],
+                    user_id=tx_rec["user_id"],
+                    type=tx_rec.get("type", "topup"),
+                    amount=float(tx_rec.get("amount", 0.0)),
+                    description=tx_rec.get("description")
+                )
+                db.add(t)
+
+        for c_rec in data.get("coupons", []):
+            existing_c = db.query(Coupon).filter(Coupon.id == c_rec["id"]).first()
+            if not existing_c:
+                c = Coupon(
+                    id=c_rec["id"],
+                    code=c_rec["code"],
+                    value=float(c_rec.get("value", 0.0)),
+                    usage_limit=c_rec.get("usage_limit", 1),
+                    redeemed_count=c_rec.get("redeemed_count", 0),
+                    is_active=bool(c_rec.get("is_active", True))
+                )
+                db.add(c)
+
         db.commit()
-        if restored_users > 0 or restored_orders > 0:
-            logger.info(f"[PERSISTENCE] Restored {restored_users} users & {restored_orders} orders from persistent backup state!")
+        if restored_users > 0 or restored_orders > 0 or restored_addrs > 0:
+            logger.info(f"[PERSISTENCE] Restored {restored_users} users, {restored_addrs} addresses & {restored_orders} orders from persistent backup state!")
         return True
     except Exception as e:
         db.rollback()

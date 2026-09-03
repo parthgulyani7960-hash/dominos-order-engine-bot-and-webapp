@@ -1916,6 +1916,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         saved_addr.longitude = lon
         saved_addr.city = city
         db.commit()
+        auto_save_persistent_db_state(db)
         
         session["state"] = None
         # Only force address re-entry if they changed cities or lack a doorstep address
@@ -2516,7 +2517,9 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             saved_addr = SavedAddress(user_id=user.id, label="Home", is_default=True)
             db.add(saved_addr)
         saved_addr.full_address = addr_stripped
+        user.address = addr_stripped
         db.commit()
+        auto_save_persistent_db_state(db)
         
         logger.info(f"[Bot Checkout] Saved doorstep address without geocoding: {addr_stripped}")
             
@@ -4848,6 +4851,20 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         # User confirmed existing city + saved details
         address = session.get("temp_address")
         phone   = session.get("temp_phone")
+        
+        if not address:
+            saved_addr = db.query(SavedAddress).filter(SavedAddress.user_id == user.id).first()
+            if saved_addr and saved_addr.full_address and saved_addr.full_address != "GPS Location":
+                address = saved_addr.full_address
+                session["temp_address"] = address
+            elif user.address:
+                address = user.address
+                session["temp_address"] = address
+
+        if not phone and user.phone:
+            phone = user.phone
+            session["temp_phone"] = phone
+
         if address and phone:
             session["state"] = "waiting_for_confirm"
             confirm_text, confirm_markup = render_order_confirmation_screen(db, user, session)
@@ -4969,11 +4986,30 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await answer_callback_query(callback_query_id)
 
     elif data == "checkout_use_saved":
-        address = html_escape(session.get("temp_address"))
-        phone = html_escape(session.get("temp_phone"))
-        
+        address = session.get("temp_address")
+        phone   = session.get("temp_phone")
+
+        if not address:
+            saved_addr = db.query(SavedAddress).filter(SavedAddress.user_id == user.id).first()
+            if saved_addr and saved_addr.full_address and saved_addr.full_address != "GPS Location":
+                address = saved_addr.full_address
+                session["temp_address"] = address
+            elif user.address:
+                address = user.address
+                session["temp_address"] = address
+
+        if not phone and user.phone:
+            phone = user.phone
+            session["temp_phone"] = phone
+
         if not address or not phone:
-            await answer_callback_query(callback_query_id, "Error: Saved details missing.")
+            await answer_callback_query(callback_query_id, "Saved details incomplete.")
+            if not address:
+                session["state"] = "waiting_for_address"
+                await send_bot_message(user.telegram_id, "🏡 <b>Please type your full delivery address:</b>")
+            elif not phone:
+                session["state"] = "waiting_for_phone"
+                await send_bot_message(user.telegram_id, "📱 <b>Please enter your contact mobile number:</b>")
             return
             
         session["state"] = "waiting_for_confirm"
