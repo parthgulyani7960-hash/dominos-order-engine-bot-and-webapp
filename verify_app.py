@@ -1131,6 +1131,49 @@ class TestPizzaPlatform(unittest.TestCase):
         self.assertIn("My Wallet", wallet_text)
         self.assertIn("wallet_tx_history_page_1", str(wallet_markup))
 
+    def test_20_user_suspension_and_support_faqs(self):
+        """Verifies user blocked enforcement and support FAQ menu additions."""
+        import asyncio
+        from unittest.mock import patch, AsyncMock
+        from app.backend.bot import USER_BOT_SESSION, process_incoming_message_task, process_bot_callback_task
+        
+        # 1. Create a blocked user
+        blocked_user = User(
+            telegram_id="88877711",
+            username="blocked_guy",
+            display_name="Blocked Guy",
+            is_blocked=True
+        )
+        self.db.add(blocked_user)
+        self.db.commit()
+        
+        # 2. Test callback query blocked check via wrapper
+        with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
+             patch("app.backend.bot.answer_callback_query", new_callable=AsyncMock) as mock_answer:
+            asyncio.run(process_bot_callback_task(
+                telegram_id=88877711,
+                first_name="Blocked",
+                last_name="Guy",
+                username="blocked_guy",
+                data="menu_view",
+                message_id=100,
+                callback_query_id="cb_1"
+            ))
+            mock_answer.assert_called_with("cb_1", "❌ Your account is suspended. Please contact support.", show_alert=True)
+        
+        # 3. Test message handler blocked check via wrapper
+        with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send:
+            asyncio.run(process_incoming_message_task(
+                telegram_id=88877711,
+                first_name="Blocked",
+                last_name="Guy",
+                username="blocked_guy",
+                text="Hello bot"
+            ))
+            mock_send.assert_called_once()
+            call_args = mock_send.call_args[0]
+            self.assertIn("Account Suspended", call_args[1])
+
 def hashlib_sha256(text: str) -> str:
 
 
