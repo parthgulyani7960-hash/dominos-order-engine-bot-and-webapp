@@ -20,7 +20,7 @@ import json
 import html
 from .utils import escape_html
 from sqlalchemy.orm import Session
-from .database import SessionLocal, User, SupportMessage, ErrorLog, SystemConfig, Product, Order, OrderItem, OrderStatusHistory, GiftCard, AuditLog, LocationPricing, Notification, UTRAttempt, SavedAddress, Coupon, CouponRedemption, WalletTransaction, WithdrawalRequest, OrderNote, RiderAssignment, Proxy, ProxyLog, DominosSession
+from .database import SessionLocal, User, SupportMessage, ErrorLog, SystemConfig, Product, Order, OrderItem, OrderStatusHistory, GiftCard, AuditLog, LocationPricing, Notification, UTRAttempt, SavedAddress, Coupon, CouponRedemption, WalletTransaction, WithdrawalRequest, OrderNote, RiderAssignment, Proxy, ProxyLog, DominosSession, auto_save_persistent_db_state, auto_restore_persistent_db_state
 try:
     from .database import UserSession, DominosSession
 except ImportError:

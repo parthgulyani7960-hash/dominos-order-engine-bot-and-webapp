@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from pydantic import BaseModel, Field
 
-from .database import get_db, User, UserSession, Product, Order, OrderItem, OrderStatusHistory, GiftCard, SupportMessage, AuditLog, ErrorLog, SystemConfig, LoginAttempt, SavedAddress, LocationPricing, RiderAssignment, OrderNote, Notification, Proxy, ProxyLog, DominosSession, DominosOTPRequest, QRGenerationHistory, VerifiedUTR, UTRAttempt, RobotLog, Coupon, CouponRedemption, WalletTransaction
+from .database import get_db, User, UserSession, Product, Order, OrderItem, OrderStatusHistory, GiftCard, SupportMessage, AuditLog, ErrorLog, SystemConfig, LoginAttempt, SavedAddress, LocationPricing, RiderAssignment, OrderNote, Notification, Proxy, ProxyLog, DominosSession, DominosOTPRequest, QRGenerationHistory, VerifiedUTR, UTRAttempt, RobotLog, Coupon, CouponRedemption, WalletTransaction, auto_save_persistent_db_state, auto_restore_persistent_db_state
 import logging
 logger = logging.getLogger(__name__)
 from .services import dominos_service
