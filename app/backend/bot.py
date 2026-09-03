@@ -1287,6 +1287,7 @@ async def process_auto_pay_for_user(db: Session, target_user: User):
         pending_orders = db.query(Order).filter(
             Order.user_id == target_user.id,
             Order.status == "Pending Payment",
+            Order.payment_method != "direct_upi",
             ~Order.id.like("TOPUP-%")
         ).order_by(Order.created_at.asc()).all()
 
@@ -7572,6 +7573,21 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         order.status = "Order Processing"
         h1 = OrderStatusHistory(order_id=order.id, status="Order Processing", note="Direct UPI payment verified by admin")
         db.add(h1)
+        
+        # Link payment transaction directly to this order
+        existing_tx = db.query(WalletTransaction).filter(
+            WalletTransaction.user_id == order.user_id,
+            WalletTransaction.description.like(f"%{order.id}%")
+        ).first()
+        if not existing_tx:
+            tx = WalletTransaction(
+                user_id=order.user_id,
+                type="payment",
+                amount=-order.total_payable,
+                description=f"Direct UPI Payment for order: {order.id}"
+            )
+            db.add(tx)
+
         db.commit()
         auto_save_persistent_db_state(db)
 

@@ -4683,6 +4683,21 @@ async def approve_payment_manually(attempt_id: str, request: Request = None, db:
     h2 = OrderStatusHistory(order_id=order.id, status="Paid")
     db.add(h2)
     
+    # Record WalletTransaction linked directly to this order
+    from .database import WalletTransaction
+    existing_tx = db.query(WalletTransaction).filter(
+        WalletTransaction.user_id == order.user_id,
+        WalletTransaction.description.like(f"%{order.id}%")
+    ).first()
+    if not existing_tx:
+        tx = WalletTransaction(
+            user_id=order.user_id,
+            type="payment",
+            amount=-order.total_payable,
+            description=f"Direct Payment for order: {order.id}"
+        )
+        db.add(tx)
+    
     # Log to OrderNote
     from .database import OrderNote
     admin_info = f"@{admin.username} ({admin.telegram_id})" if admin.username else f"{admin.display_name} ({admin.telegram_id})"
