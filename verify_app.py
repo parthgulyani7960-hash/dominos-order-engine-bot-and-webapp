@@ -1331,14 +1331,17 @@ class TestPizzaPlatform(unittest.TestCase):
             telegram_id="888111222",
             display_name="Support Test User <Tag>",
             username="supp_user",
-            role="customer"
+            role="customer",
+            bot_state="waiting_for_support_message"
         )
         self.db.add(test_user)
         self.db.commit()
 
         # 1. Test state cancellation for waiting_for_support_message
         session = {"state": "waiting_for_support_message"}
-        with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
+        with patch("backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
+             patch("app.backend.bot.send_bot_message", new_callable=AsyncMock), \
+             patch("backend.bot.USER_BOT_SESSION", {"888111222": session}), \
              patch("app.backend.bot.USER_BOT_SESSION", {"888111222": session}):
             asyncio.run(handle_bot_message(
                 self.db, "888111222", "Support Test", "User", "supp_user",
@@ -1350,8 +1353,12 @@ class TestPizzaPlatform(unittest.TestCase):
             self.assertIn("cancelled", mock_send.call_args[0][1].lower())
 
         # 2. Test sending support ticket with HTML characters
+        test_user.bot_state = "waiting_for_support_message"
+        self.db.commit()
         session = {"state": "waiting_for_support_message"}
-        with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
+        with patch("backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
+             patch("app.backend.bot.send_bot_message", new_callable=AsyncMock), \
+             patch("backend.bot.USER_BOT_SESSION", {"888111222": session}), \
              patch("app.backend.bot.USER_BOT_SESSION", {"888111222": session}):
             asyncio.run(handle_bot_message(
                 self.db, "888111222", "Support Test", "User", "supp_user",
@@ -1366,7 +1373,9 @@ class TestPizzaPlatform(unittest.TestCase):
 
         # 3. Test admin reply cancellation
         admin_session = {"state": "admin_replying_to_888111222"}
-        with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
+        with patch("backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
+             patch("app.backend.bot.send_bot_message", new_callable=AsyncMock), \
+             patch("backend.bot.USER_BOT_SESSION", {"123456789": admin_session}), \
              patch("app.backend.bot.USER_BOT_SESSION", {"123456789": admin_session}):
             asyncio.run(handle_bot_message(
                 self.db, "123456789", "Admin", "User", "admin",
@@ -1379,13 +1388,13 @@ class TestPizzaPlatform(unittest.TestCase):
         headers = {"Authorization": f"Bearer {token}"}
         
         # Send message via user
-        res = client.post("/support/messages", json={"message": "Need help via Web App!"}, headers=headers)
+        res = client.post("/api/support/messages", json={"message": "Need help via Web App!"}, headers=headers)
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(data["message"], "Need help via Web App!")
 
         # Fetch support messages
-        res_get = client.get("/support/messages", headers=headers)
+        res_get = client.get("/api/support/messages", headers=headers)
         self.assertEqual(res_get.status_code, 200)
         msgs = res_get.json()
         self.assertGreaterEqual(len(msgs), 2)
@@ -1404,7 +1413,7 @@ class TestPizzaPlatform(unittest.TestCase):
         admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
         with patch("app.backend.routes.send_bot_message", new_callable=AsyncMock):
-            res_admin_reply = client.post("/admin/support-reply", json={
+            res_admin_reply = client.post("/api/admin/support-reply", json={
                 "user_id": test_user.id,
                 "message": "We have checked your issue and resolved it!"
             }, headers=admin_headers)
