@@ -1052,23 +1052,39 @@ async def display_delivery_location_menu(db: Session, user: User):
     session = USER_BOT_SESSION.setdefault(user.telegram_id, {"cart": {}, "state": None})
     session["state"] = "in_location_menu"
     
-    if user.latitude is not None and user.longitude is not None:
-        coord_line = f"📡 <b>GPS Location:</b> <code>{user.latitude:.5f}, {user.longitude:.5f}</code>"
+    has_gps = (user.latitude is not None and user.longitude is not None)
+    if has_gps:
+        city_lbl = f" ({user.city})" if user.city and user.city != "GPS Location" else ""
+        coord_line = f"📡 <b>GPS Location:</b> ✅ <code>{user.latitude:.5f}, {user.longitude:.5f}</code>{city_lbl}"
+        gps_btn_text = "📍 Update GPS Location"
     else:
-        coord_line = f"📡 <b>GPS Location:</b> <i>⚠️ No GPS coordinates saved</i>"
+        coord_line = f"📡 <b>GPS Location:</b> 🔴 <b>NOT SET (REQUIRED)</b>\n  └ <i>Tap button below to share coordinates for Domino's store mapping</i>"
+        gps_btn_text = "🔴 📍 Share GPS Location (REQUIRED)"
         
     saved_addr = db.query(SavedAddress).filter(SavedAddress.user_id == user.id).first()
-    if saved_addr and saved_addr.full_address and saved_addr.full_address != "GPS Location":
-        addr_line = f"\n🏠 <b>Doorstep Address:</b> <code>{saved_addr.full_address}</code>"
-    elif user.address and user.address != "GPS Location":
-        addr_line = f"\n🏠 <b>Doorstep Address:</b> <code>{user.address}</code>"
-    else:
-        addr_line = f"\n🏠 <b>Doorstep Address:</b> <i>⚠️ No doorstep address saved</i>"
+    has_addr = False
+    full_addr = ""
+    if saved_addr and saved_addr.full_address and saved_addr.full_address != "GPS Location" and len(saved_addr.full_address.strip()) > 3:
+        has_addr = True
+        full_addr = saved_addr.full_address
+    elif user.address and user.address != "GPS Location" and len(user.address.strip()) > 3:
+        has_addr = True
+        full_addr = user.address
         
-    if user.phone:
-        phone_line = f"\n📱 <b>Phone Number:</b> <code>{user.phone}</code>"
+    if has_addr:
+        addr_line = f"\n🏠 <b>Doorstep Address:</b> ✅ <code>{escape_html(full_addr)}</code>"
+        addr_btn_text = "🏠 Edit Delivery Address"
     else:
-        phone_line = f"\n📱 <b>Phone Number:</b> <i>⚠️ No phone number saved</i>"
+        addr_line = f"\n🏠 <b>Doorstep Address:</b> ⚠️ <b>NOT SET</b>\n  └ <i>Flat/Building, Street & Landmark required for delivery rider</i>"
+        addr_btn_text = "⚠️ 🏠 Enter Doorstep Address"
+        
+    has_phone = (user.phone is not None and len(str(user.phone).strip()) >= 10)
+    if has_phone:
+        phone_line = f"\n📱 <b>Phone Number:</b> ✅ <code>{escape_html(user.phone)}</code>"
+        phone_btn_text = "📱 Edit Phone Number"
+    else:
+        phone_line = f"\n📱 <b>Phone Number:</b> ⚠️ <b>NOT SET</b>\n  └ <i>10-digit mobile number required for order updates</i>"
+        phone_btn_text = "⚠️ 📱 Enter Mobile Number"
 
     loc_msg = (
         f"📍 <b>Delivery Location & Details</b>\n"
@@ -1082,9 +1098,9 @@ async def display_delivery_location_menu(db: Session, user: User):
     
     loc_options_keyboard = {
         "keyboard": [
-            [{"text": "📍 Share My GPS Location", "request_location": True}],
-            [{"text": "🏠 Update Delivery Address"}],
-            [{"text": "📱 Update Phone Number"}],
+            [{"text": gps_btn_text, "request_location": True}],
+            [{"text": addr_btn_text}],
+            [{"text": phone_btn_text}],
             [{"text": "🔙 Back"}]
         ],
         "resize_keyboard": True,
@@ -4069,24 +4085,48 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 ]
             }
         else:
-            lines = ["🎉 <b>Special Active Deals:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"]
+            lines = ["🎉 <b>Active Promotional Deals & Combos:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"]
             buttons = []
             
-            for off in db_offers:
+            for idx, off in enumerate(db_offers, 1):
                 badge_str = f" [{off.badge}]" if off.badge else ""
                 orig_price_str = f" <s>₹{off.original_price:.0f}</s>" if off.original_price and off.original_price > off.discounted_price else ""
-                desc_str = f"• {escape_html(off.description)}\n" if off.description else ""
+                desc_str = f"<i>{escape_html(off.description)}</i>\n" if off.description else ""
+                
+                # Parse item details from items_json if available
+                items_breakdown = ""
+                if off.items_json:
+                    try:
+                        p_items = json.loads(off.items_json)
+                        if isinstance(p_items, list) and len(p_items) > 0:
+                            items_breakdown = "  <b>Included Items:</b>\n"
+                            for itm in p_items:
+                                name = itm.get("name") or itm.get("category") or "Item"
+                                size = itm.get("size", "")
+                                qty = itm.get("qty") or itm.get("quantity") or 1
+                                sz_str = f" ({size})" if size else ""
+                                items_breakdown += f"  • {qty}x <b>{escape_html(name)}</b>{sz_str}\n"
+                    except Exception:
+                        pass
+                        
+                savings_str = ""
+                if off.original_price and off.original_price > off.discounted_price:
+                    savings = off.original_price - off.discounted_price
+                    pct = int((savings / off.original_price) * 100)
+                    savings_str = f"  ✨ <b>You Save: ₹{savings:.0f} ({pct}% OFF)!</b>\n"
                 
                 lines.append(
-                    f"<b>{escape_html(off.title)}</b>{badge_str}\n"
+                    f"{idx}️⃣ <b>{escape_html(off.title)}</b>{badge_str}\n"
                     f"{desc_str}"
-                    f"• <b>Deal Price:</b> <b>₹{off.discounted_price:.2f}</b>{orig_price_str} + ₹{bot_fee:.2f} Service Fee\n"
+                    f"{items_breakdown}"
+                    f"  💰 <b>Deal Price: ₹{off.discounted_price:.2f}</b>{orig_price_str}\n"
+                    f"{savings_str}"
                 )
                 
                 btn_cb = f"apply_offer_{off.offer_key}"
-                buttons.append([{"text": off.button_text or f"🛒 Grab {off.title} @ ₹{off.discounted_price:.0f}", "callback_data": btn_cb}])
+                buttons.append([{"text": off.button_text or f"🛒 Grab Deal {idx} @ ₹{off.discounted_price:.0f}", "callback_data": btn_cb}])
             
-            lines.append("💡 <i>Tap a deal below to load it into your cart instantly. Custom combinations available via Support!</i>")
+            lines.append("💡 <i>Tap any deal button below to load the combo into your cart instantly!</i>")
             offers_text = "\n".join(lines)
             buttons.append([{"text": "🛒 View Cart", "callback_data": "cart_view"}])
             offers_markup = {"inline_keyboard": buttons}

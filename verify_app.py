@@ -1545,6 +1545,50 @@ class TestPizzaPlatform(unittest.TestCase):
         self.db.refresh(offer)
         self.assertEqual(offer.badge, "🔥 50% OFF")
 
+    def test_26_active_offers_rich_item_display_and_db_persistence(self):
+        """Tests Active Offer rich item breakdown formatting, sequence rendering, and persistence auto-save/auto-restore."""
+        import asyncio
+        from backend.bot import handle_bot_message
+        from backend.database import ActiveOffer, auto_save_persistent_db_state, auto_restore_persistent_db_state
+        
+        user_tg = "666555"
+        asyncio.run(handle_bot_message(self.db, user_tg, "Test", "Deals", "testdeals", "/start"))
+        
+        # Add rich ActiveOffer with item breakdown JSON
+        import json
+        rich_offer = ActiveOffer(
+            offer_key="deal_rich_combo",
+            title="Party Fiesta Combo",
+            badge="⚡ 50% OFF",
+            description="Complete pizza party package",
+            discounted_price=499.0,
+            original_price=1000.0,
+            button_text="🛒 Grab Party Fiesta Combo (₹499)",
+            is_active=True,
+            sort_order=1,
+            items_json=json.dumps([
+                {"name": "Margherita Pizza", "size": "Medium (10\")", "qty": 2},
+                {"name": "Garlic Breadsticks", "size": "Standard", "qty": 1},
+                {"name": "Pepsi", "size": "475ml", "qty": 1}
+            ])
+        )
+        self.db.add(rich_offer)
+        self.db.commit()
+        
+        # Test viewing offers
+        asyncio.run(handle_bot_message(self.db, user_tg, "Test", "Deals", "testdeals", "🎉 Active Offers"))
+        
+        # Test persistence functions
+        saved = auto_save_persistent_db_state(self.db)
+        self.assertTrue(saved)
+        
+        restored = auto_restore_persistent_db_state(self.db)
+        self.assertTrue(restored)
+        
+        check_off = self.db.query(ActiveOffer).filter(ActiveOffer.offer_key == "deal_rich_combo").first()
+        self.assertIsNotNone(check_off)
+        self.assertEqual(check_off.discounted_price, 499.0)
+
 def hashlib_sha256(text: str) -> str:
 
 

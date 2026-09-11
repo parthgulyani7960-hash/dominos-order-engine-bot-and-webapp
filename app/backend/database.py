@@ -836,14 +836,32 @@ def auto_save_persistent_db_state(db=None) -> bool:
                 "is_active": bool(c.is_active),
             })
 
+        offers = db.query(ActiveOffer).all()
+        offers_data = []
+        for o in offers:
+            offers_data.append({
+                "id": o.id,
+                "offer_key": o.offer_key,
+                "title": o.title,
+                "badge": o.badge,
+                "description": o.description,
+                "discounted_price": float(o.discounted_price or 0.0),
+                "original_price": float(o.original_price or 0.0),
+                "button_text": o.button_text,
+                "is_active": bool(o.is_active),
+                "sort_order": int(o.sort_order or 0),
+                "items_json": o.items_json
+            })
+
         data = {
-            "version": 1.1,
+            "version": 1.2,
             "saved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "users": users_data,
             "saved_addresses": addresses_data,
             "orders": orders_data,
             "wallet_transactions": tx_data,
             "coupons": coupons_data,
+            "offers": offers_data,
         }
 
         with open(PERSISTENT_BACKUP_PATH, "w", encoding="utf-8") as f:
@@ -987,6 +1005,34 @@ def auto_restore_persistent_db_state(db) -> bool:
                     is_active=bool(c_rec.get("is_active", True))
                 )
                 db.add(c)
+
+        for off_rec in data.get("offers", []):
+            existing_off = db.query(ActiveOffer).filter((ActiveOffer.id == off_rec["id"]) | (ActiveOffer.offer_key == off_rec["offer_key"])).first()
+            if not existing_off:
+                off = ActiveOffer(
+                    id=off_rec["id"],
+                    offer_key=off_rec["offer_key"],
+                    title=off_rec["title"],
+                    badge=off_rec.get("badge"),
+                    description=off_rec.get("description"),
+                    discounted_price=float(off_rec.get("discounted_price", 0.0)),
+                    original_price=float(off_rec.get("original_price", 0.0)),
+                    button_text=off_rec["button_text"],
+                    is_active=bool(off_rec.get("is_active", True)),
+                    sort_order=int(off_rec.get("sort_order", 0)),
+                    items_json=off_rec.get("items_json")
+                )
+                db.add(off)
+            else:
+                existing_off.title = off_rec["title"]
+                existing_off.discounted_price = float(off_rec.get("discounted_price", existing_off.discounted_price))
+                existing_off.original_price = float(off_rec.get("original_price", existing_off.original_price))
+                existing_off.badge = off_rec.get("badge", existing_off.badge)
+                existing_off.description = off_rec.get("description", existing_off.description)
+                existing_off.button_text = off_rec.get("button_text", existing_off.button_text)
+                existing_off.is_active = bool(off_rec.get("is_active", existing_off.is_active))
+                existing_off.sort_order = int(off_rec.get("sort_order", existing_off.sort_order))
+                existing_off.items_json = off_rec.get("items_json", existing_off.items_json)
 
         db.commit()
         if restored_users > 0 or restored_orders > 0 or restored_addrs > 0:
