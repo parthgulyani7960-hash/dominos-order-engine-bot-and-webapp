@@ -1,9 +1,9 @@
 {
   "version": 1.2,
-  "saved_at": "2026-09-11T15:30:18.734756+00:00",
+  "saved_at": "2026-09-11T15:58:21.323413+00:00",
   "users": [
     {
-      "id": "1cf5f9f0-b9cd-4793-931c-a2860613f9de",
+      "id": "c14e5136-3bd5-4957-8b2b-b209b5849adc",
       "telegram_id": "777666",
       "username": "admin",
       "display_name": "Super Admin",
@@ -17,10 +17,10 @@
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-11T15:30:17.114737"
+      "created_at": "2026-09-11T15:58:18.905438"
     },
     {
-      "id": "c799e651-22f0-4806-9a2c-1af3bb86b0a3",
+      "id": "d68fea38-2d23-4c16-841f-52966fc000a1",
       "telegram_id": "777888",
       "username": "stackeruser",
       "display_name": "Stacker User",
@@ -34,7 +34,7 @@
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-11T15:30:17.121965"
+      "created_at": "2026-09-11T15:58:18.911060"
     }
   ],
   "saved_addresses": [
@@ -347,6 +347,86 @@
       "longitude": 72.8777,
       "city": "Mumbai",
       "is_default": true
+    },
+    {
+      "id": "fbb2f779-8b57-4c76-ba20-c719434f0bbf",
+      "user_id": "acb5b8ae-be41-47d9-92fb-9d959d013cff",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "37cf884d-e181-4fed-867d-96f32f78b6eb",
+      "user_id": "057f4684-71b8-4adc-821d-9e53358489a9",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "06acb0c2-54fb-4ba8-b947-20f0f9d49c38",
+      "user_id": "85cc2068-0047-4a2b-bc58-94b795545df4",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "2131032b-041c-4370-9215-03635dba87d8",
+      "user_id": "97105633-fa7f-40ea-b544-2ff7f953a6bd",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "c4501725-cb34-4d59-bd01-30afc855e29b",
+      "user_id": "0520e720-63d8-4b33-93d5-c8537c58a618",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "730d2893-263b-45e2-9a30-13174829a056",
+      "user_id": "89626945-f833-4681-b2b2-726b8753d7fc",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "add01c13-ab75-43d6-b01f-07c3ee174e5d",
+      "user_id": "477e909b-c616-473d-85e6-7c0bf221bc3c",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "09a871bb-ec19-4cd2-9789-78844cff926f",
+      "user_id": "d68fea38-2d23-4c16-841f-52966fc000a1",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
     }
   ],
   "orders": [],
@@ -445,7 +525,7 @@
       "items_json": "[{\"name\": \"Chicken Sausage\", \"qty\": 2}]"
     },
     {
-      "id": "3d63bc21-eabb-4eb4-b863-7bc080e7a5ce",
+      "id": "158cc355-8aeb-4cff-b2a3-d9841ac83db4",
       "offer_key": "deal_bot_edit_test",
       "title": "Bot Edit Test Deal",
       "badge": "\ud83d\udd25 50% OFF",
@@ -458,7 +538,7 @@
       "items_json": null
     },
     {
-      "id": "3f76e76d-f332-47ab-94d1-72cc1458973f",
+      "id": "934763b7-2946-42ae-bf82-5c9f0e44eaf5",
       "offer_key": "deal_rich_combo",
       "title": "Party Fiesta Combo",
       "badge": "\u26a1 50% OFF",

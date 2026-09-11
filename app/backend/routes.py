@@ -905,6 +905,7 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
         )
         db.add(qr_hist)
         db.commit()
+        auto_save_persistent_db_state(db)
         
         caption_text = (
             f"💳 <b>Domino's Order Engine UPI Payment QR Code</b>\n"
@@ -998,6 +999,7 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
             "user": user.display_name
         })
         await sse_broadcast_callback({"type": "order_update"})
+    auto_save_persistent_db_state(db)
         
     return {
         "order_id": order.id,
@@ -1550,6 +1552,7 @@ def create_active_offer(payload: ActiveOfferCreatePayload, db: Session = Depends
     )
     db.add(offer)
     db.commit()
+    auto_save_persistent_db_state(db)
     db.refresh(offer)
     return offer
 
@@ -1580,6 +1583,7 @@ def update_active_offer(offer_id: str, payload: ActiveOfferUpdatePayload, db: Se
         offer.items_json = payload.items_json
 
     db.commit()
+    auto_save_persistent_db_state(db)
     db.refresh(offer)
     return offer
 
@@ -1592,6 +1596,7 @@ def toggle_active_offer(offer_id: str, db: Session = Depends(get_db), admin: Use
 
     offer.is_active = not offer.is_active
     db.commit()
+    auto_save_persistent_db_state(db)
     return {"status": "success", "is_active": offer.is_active, "offer_id": offer.id}
 
 @router.delete("/admin/offers/{offer_id}")
@@ -1603,6 +1608,7 @@ def delete_active_offer(offer_id: str, db: Session = Depends(get_db), admin: Use
 
     db.delete(offer)
     db.commit()
+    auto_save_persistent_db_state(db)
     return {"status": "success", "message": f"Offer {offer_id} deleted successfully"}
 
 

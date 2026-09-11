@@ -904,13 +904,19 @@ def auto_restore_persistent_db_state(db) -> bool:
 
         restored_users = 0
         for u_data in data.get("users", []):
-            tg_id = str(u_data.get("telegram_id", ""))
-            existing = db.query(User).filter(
-                (User.telegram_id == tg_id) | (User.id == u_data["id"])
-            ).first()
+            raw_tg_id = u_data.get("telegram_id")
+            tg_id = str(raw_tg_id).strip() if (raw_tg_id is not None and str(raw_tg_id).strip() not in ("", "None")) else None
+            u_id = u_data.get("id")
+
+            existing = None
+            if tg_id:
+                existing = db.query(User).filter(User.telegram_id == tg_id).first()
+            if not existing and u_id:
+                existing = db.query(User).filter(User.id == u_id).first()
+
             if not existing:
                 u = User(
-                    id=u_data["id"],
+                    id=u_id,
                     telegram_id=tg_id,
                     username=u_data.get("username"),
                     display_name=u_data.get("display_name"),
