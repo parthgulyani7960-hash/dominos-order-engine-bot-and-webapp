@@ -1400,15 +1400,17 @@ class TestPizzaPlatform(unittest.TestCase):
         self.assertGreaterEqual(len(msgs), 2)
 
         # Admin reply via API
-        admin_user = User(
-            id="usr_admin_supp_test",
-            telegram_id="123456789",
-            display_name="Admin",
-            username="admin",
-            role="admin"
-        )
-        self.db.add(admin_user)
-        self.db.commit()
+        admin_user = self.db.query(User).filter(User.role == "admin").first()
+        if not admin_user:
+            admin_user = User(
+                id="usr_admin_supp_test",
+                telegram_id="888999000",
+                display_name="Admin",
+                username="admin",
+                role="admin"
+            )
+            self.db.add(admin_user)
+            self.db.commit()
         admin_token = create_access_token({"sub": admin_user.id})
         admin_headers = {"Authorization": f"Bearer {admin_token}"}
 

@@ -1407,7 +1407,14 @@ async def send_support_message(payload: SupportMessageSend, db: Session = Depend
             "created_at": msg.created_at.isoformat()
         })
         
-    return msg
+    return {
+        "id": msg.id,
+        "user_id": msg.user_id,
+        "sender_type": msg.sender_type,
+        "message": msg.message,
+        "is_read": msg.is_read,
+        "created_at": msg.created_at.isoformat() if msg.created_at else None
+    }
 
 # --- ADMIN PANEL ROUTES ---
 
