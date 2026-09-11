@@ -1301,6 +1301,8 @@ def get_order_details(order_id: str, db: Session = Depends(get_db), user: User =
         "discount": order.discount,
         "service_charge": order.service_charge,
         "total_payable": order.total_payable,
+        "wallet_applied": getattr(order, "wallet_applied", 0.0) or 0.0,
+        "upi_paid": getattr(order, "upi_paid", 0.0) or 0.0,
         "address": order.address,
         "landmark": order.landmark,
         "latitude": order.latitude,

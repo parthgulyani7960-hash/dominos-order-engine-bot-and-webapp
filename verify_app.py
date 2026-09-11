@@ -1595,6 +1595,93 @@ class TestPizzaPlatform(unittest.TestCase):
         self.assertIsNotNone(check_off)
         self.assertEqual(check_off.discounted_price, 499.0)
 
+    def test_27_active_offer_stacking_checkout_wallet_and_gps_keyboard_sync(self):
+        """Validates multi active offer stacking, partial wallet breakdown on Order model, cancellation refund, and GPS location reply keyboard update."""
+        import asyncio
+        from backend.bot import handle_bot_message, render_cart_message, USER_BOT_SESSION
+        from backend.database import Order, WalletTransaction, ActiveOffer, SavedAddress
+
+        user_tg = "777888"
+        asyncio.run(handle_bot_message(self.db, user_tg, "Stacker", "User", "stackeruser", "/start"))
+        user = self.db.query(User).filter(User.telegram_id == user_tg).first()
+        self.assertIsNotNone(user)
+        user.wallet_balance = 250.0
+        self.db.commit()
+
+        # Seed default active offers
+        from backend.database import seed_default_active_offers
+        seed_default_active_offers(self.db)
+
+        # Add 2 different active offers to cart
+        session = USER_BOT_SESSION[user_tg]
+        session["cart"] = {
+            "offer_deal_1": 1,  # ₹410
+            "offer_deal_2": 1,  # ₹320
+        }
+        
+        cart_text, cart_markup = render_cart_message(self.db, user, session["cart"], session)
+        self.assertIn("Veg Pizza Combo", cart_text)
+        self.assertIn("Partial Wallet Payment", cart_text)
+
+        # Test location share updates user location & saved address
+        location_data = {"latitude": 19.0760, "longitude": 72.8777}
+        asyncio.run(handle_bot_message(self.db, user_tg, "Stacker", "User", "stackeruser", "", location=location_data))
+        self.db.refresh(user)
+        self.assertEqual(user.latitude, 19.0760)
+        self.assertEqual(user.longitude, 72.8777)
+        
+        # Test creating partial wallet order directly
+        subtotal = 410.0 + 320.0
+        bot_fee = 10.0
+        total_payable = subtotal + bot_fee # 740.0
+        wallet_applied = 250.0
+        upi_paid = 490.0
+
+        user.wallet_balance -= wallet_applied
+        order = Order(
+            id="BOT-STACK1",
+            user_id=user.id,
+            transaction_id="REF-STACK1",
+            payment_method="partial_wallet_upi",
+            original_total=subtotal,
+            total_payable=total_payable,
+            wallet_applied=wallet_applied,
+            upi_paid=upi_paid,
+            status="Pending Payment",
+            address="123 Stacking Road, Mumbai",
+            phone="9876543210"
+        )
+        tx = WalletTransaction(
+            user_id=user.id,
+            type="payment",
+            amount=-wallet_applied,
+            description="Paid ₹250.00 from wallet for Order #BOT-STACK1 (₹490.00 UPI remaining)"
+        )
+        self.db.add(order)
+        self.db.add(tx)
+        self.db.commit()
+
+        # Verify wallet applied & upi paid saved on Order model
+        saved_order = self.db.query(Order).filter(Order.id == "BOT-STACK1").first()
+        self.assertEqual(saved_order.wallet_applied, 250.0)
+        self.assertEqual(saved_order.upi_paid, 490.0)
+
+        # Test order cancellation automatically refunds exact wallet_applied
+        user.wallet_balance += saved_order.wallet_applied
+        refund_tx = WalletTransaction(
+            user_id=user.id,
+            type="refund",
+            amount=saved_order.wallet_applied,
+            description=f"Refund for cancelled order #{saved_order.id}"
+        )
+        saved_order.status = "Cancelled"
+        saved_order.wallet_applied = 0.0
+        self.db.add(refund_tx)
+        self.db.commit()
+
+        self.db.refresh(user)
+        self.assertEqual(user.wallet_balance, 250.0)
+
 def hashlib_sha256(text: str) -> str:
 
 

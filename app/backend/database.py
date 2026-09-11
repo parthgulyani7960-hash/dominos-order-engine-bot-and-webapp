@@ -253,6 +253,8 @@ class Order(TimestampMixin, Base):
     device_details        = Column(Text, nullable=True)
     sector_store          = Column(String, nullable=True)
     screenshot_url        = Column(String, nullable=True)
+    wallet_applied        = Column(Float, default=0.0)  # Amount paid via wallet balance
+    upi_paid              = Column(Float, default=0.0)  # Amount paid via UPI / Direct Payment
     version               = Column(Integer, default=0, nullable=False)  # optimistic locking
 
     user           = relationship("User", back_populates="orders")
@@ -810,6 +812,8 @@ def auto_save_persistent_db_state(db=None) -> bool:
                 "address": o.address,
                 "phone": o.phone,
                 "dominos_reference": getattr(o, "dominos_reference", None),
+                "wallet_applied": float(getattr(o, "wallet_applied", 0.0) or 0.0),
+                "upi_paid": float(getattr(o, "upi_paid", 0.0) or 0.0),
                 "transaction_id": o.transaction_id,
                 "created_at": o.created_at.isoformat() if o.created_at else None,
             })
@@ -976,6 +980,8 @@ def auto_restore_persistent_db_state(db) -> bool:
                     address=o_data.get("address"),
                     phone=o_data.get("phone"),
                     dominos_reference=o_data.get("dominos_reference") or o_data.get("dominos_order_id"),
+                    wallet_applied=float(o_data.get("wallet_applied", 0.0)),
+                    upi_paid=float(o_data.get("upi_paid", 0.0)),
                     transaction_id=o_data.get("transaction_id", f"TXN-{uuid.uuid4().hex[:10].upper()}")
                 )
                 db.add(o)
@@ -1088,7 +1094,12 @@ def init_db() -> None:
             conn.execute(text("ALTER TABLE orders ADD COLUMN device_details TEXT"))
         if "sector_store" not in order_cols:
             conn.execute(text("ALTER TABLE orders ADD COLUMN sector_store VARCHAR"))
+        if "screenshot_url" not in order_cols:
             conn.execute(text("ALTER TABLE orders ADD COLUMN screenshot_url VARCHAR"))
+        if "wallet_applied" not in order_cols:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN wallet_applied FLOAT DEFAULT 0.0"))
+        if "upi_paid" not in order_cols:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN upi_paid FLOAT DEFAULT 0.0"))
             
         # Support messages columns
         support_cols = [c["name"] for c in insp.get_columns("support_messages")]

@@ -1414,70 +1414,221 @@ def render_admin_command_center(db: Session) -> tuple[str, dict]:
     return admin_dashboard_text, admin_inline_markup
 
 
+def resolve_cart_item(db: Session, key: str):
+    """
+    Resolves a cart key to either an ActiveOffer or a Product.
+    Returns tuple: (type_str, obj, item_name, unit_price, items_breakdown_list)
+    """
+    key_str = str(key).strip()
+    if key_str.startswith("offer_"):
+        offer_key = key_str[len("offer_"):]
+        offer = db.query(ActiveOffer).filter((ActiveOffer.offer_key == offer_key) | (ActiveOffer.id == offer_key)).first()
+        if offer:
+            items_list = []
+            if offer.items_json:
+                try:
+                    p_items = json.loads(offer.items_json)
+                    if isinstance(p_items, list):
+                        for itm in p_items:
+                            name = itm.get("name") or itm.get("category") or "Item"
+                            size = itm.get("size", "")
+                            qty = itm.get("qty") or itm.get("quantity") or 1
+                            sz_str = f" ({size})" if size else ""
+                            items_list.append(f"{qty}x {name}{sz_str}")
+                except Exception:
+                    pass
+            return ("offer", offer, offer.title, float(offer.discounted_price), items_list)
+    
+    # Fallback to product
+    prod_id = key_str.replace("prod_", "")
+    p = db.query(Product).filter(Product.id == prod_id).first()
+    if not p:
+        code_to_id, _ = get_product_mappings(db)
+        if prod_id in code_to_id:
+            p = db.query(Product).filter(Product.id == code_to_id[prod_id]).first()
+    if not p:
+        p = resolve_cart_item_product(db, key_str)
+    if p:
+        price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
+        return ("product", p, p.name, price, [])
+    
+    return (None, None, "Domino's Pizza Item", 0.0, [])
+
+
+def render_cart_message(db: Session, user: User, cart: dict, session: dict) -> tuple[str, dict]:
+    """
+    Renders the shopping cart view text and inline keyboard controls.
+    Supports both regular menu items and ActiveOffer combo items.
+    Renders inline quantity control buttons [ ➖ ] [ qty ] [ ➕ ] for each item in cart.
+    """
+    if not cart or not isinstance(cart, dict) or len(cart) == 0:
+        cart_text = (
+            "🛒 <b>Your Domino's Shopping Cart</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "<i>Your cart is empty right now! Browse our menu or check active promotional deals to add items.</i>"
+        )
+        markup = {
+            "inline_keyboard": [
+                [{"text": "🍕 Browse Pizza Menu", "callback_data": "menu_view"}],
+                [{"text": "🎉 View Active Offers", "callback_data": "menu_offers"}]
+            ]
+        }
+        return cart_text, markup
+
+    subtotal = 0.0
+    item_lines = []
+    keyboard = []
+    
+    idx = 1
+    for key_str, raw_qty in list(cart.items()):
+        qty = parse_cart_quantity(raw_qty)
+        if qty <= 0:
+            continue
+            
+        item_type, obj, item_name, unit_price, items_breakdown = resolve_cart_item(db, key_str)
+        line_total = unit_price * qty
+        subtotal += line_total
+        
+        if item_type == "offer":
+            badge_str = f" [{obj.badge}]" if (obj and obj.badge) else ""
+            breakdown_str = ""
+            if items_breakdown:
+                breakdown_str = "\n   " + "\n   ".join([f"• <i>{b}</i>" for b in items_breakdown])
+            item_lines.append(
+                f"{idx}️⃣ 🎉 <b>{escape_html(item_name)}</b>{badge_str} [Active Deal]\n"
+                f"   💵 ₹{unit_price:.2f} × {qty} = <b>₹{line_total:.2f}</b>"
+                f"{breakdown_str}"
+            )
+        else:
+            veg_dot = "🟢" if (obj and getattr(obj, "is_veg", True)) else "🔴"
+            item_lines.append(
+                f"{idx}️⃣ {veg_dot} <b>{escape_html(item_name)}</b>\n"
+                f"   💵 ₹{unit_price:.2f} × {qty} = <b>₹{line_total:.2f}</b>"
+            )
+            
+        name_short = item_name[:14] + "…" if len(item_name) > 16 else item_name
+        keyboard.append([
+            {"text": "➖", "callback_data": f"cart_sub_{key_str}"},
+            {"text": f"{qty}x {name_short}", "callback_data": "cart_noop"},
+            {"text": "➕", "callback_data": f"cart_add_{key_str}"},
+            {"text": "🗑️", "callback_data": f"cart_del_{key_str}"}
+        ])
+        idx += 1
+        
+    bot_fee = get_bot_fee(db)
+    total_payable = subtotal + bot_fee
+    
+    wallet_bal = user.wallet_balance or 0.0
+    wallet_usable = min(wallet_bal, total_payable)
+    remaining_upi = total_payable - wallet_usable
+    
+    if wallet_usable >= total_payable:
+        wallet_hint = f"💳 <i>Full Wallet Payment Available: ₹{total_payable:.2f} covered by wallet.</i>"
+    elif wallet_usable > 0:
+        wallet_hint = f"🌗 <i>Partial Wallet Payment: ₹{wallet_usable:.2f} from wallet + ₹{remaining_upi:.2f} via UPI.</i>"
+    else:
+        wallet_hint = f"💳 <i>Wallet Balance: ₹{wallet_bal:.2f}</i> (₹{total_payable:.2f} payable via UPI)"
+
+    cart_text = (
+        f"🛒 <b>Your Domino's Shopping Cart</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        + "\n\n".join(item_lines) +
+        f"\n\n━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"  Item Subtotal:     <b>₹{subtotal:.2f}</b>\n"
+        f"  Bot Service Fee:   <b>+₹{bot_fee:.2f}</b>\n"
+        f"  ─────────────────────\n"
+        f"  <b>Total Payable:    ₹{total_payable:.2f}</b>\n\n"
+        f"{wallet_hint}\n\n"
+        f"<i>Tap 🚀 Proceed to Checkout to confirm your address and place order!</i>"
+    )
+    
+    keyboard.append([{"text": "🚀 Proceed to Checkout", "callback_data": "cart_checkout"}])
+    keyboard.append([
+        {"text": "➕ Add More Pizzas", "callback_data": "menu_view"},
+        {"text": "🗑️ Clear Cart", "callback_data": "cart_empty"}
+    ])
+    
+    return cart_text, {"inline_keyboard": keyboard}
+
+
 def render_order_confirmation_screen(db: Session, user: User, session: dict) -> tuple[str, dict]:
     address = session.get("temp_address")
     phone   = session.get("temp_phone")
-    multiplier = 1.0
-    delivery_charge = 30.0
 
     cart = session.get("cart", {})
-    active_deal = session.get("active_deal")
-    if active_deal:
-        subtotal = session.get("deal_price", 0.0)
-    else:
-        subtotal = 0.0
-        for pid_str, raw_qty in cart.items():
-            qty = parse_cart_quantity(raw_qty)
-            p = resolve_cart_item_product(db, pid_str)
-            if p:
-                price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
-                subtotal += price * qty
+    subtotal = 0.0
+    item_lines = []
+    
+    for key_str, raw_qty in list(cart.items()):
+        qty = parse_cart_quantity(raw_qty)
+        if qty <= 0:
+            continue
+        item_type, obj, item_name, unit_price, items_breakdown = resolve_cart_item(db, key_str)
+        line_total = unit_price * qty
+        subtotal += line_total
+        
+        if item_type == "offer":
+            badge_str = f" [{obj.badge}]" if (obj and obj.badge) else ""
+            item_lines.append(f"  🎉 <b>{escape_html(item_name)}</b>{badge_str} ×{qty}  —  <b>₹{line_total:.2f}</b>")
+            if items_breakdown:
+                for b in items_breakdown:
+                    item_lines.append(f"     └ <i>{b}</i>")
+        else:
+            veg_dot = "🟢" if (obj and getattr(obj, "is_veg", True)) else "🔴"
+            item_lines.append(f"  {veg_dot} <b>{escape_html(item_name)}</b> ×{qty}  —  <b>₹{line_total:.2f}</b>")
+            
+    items_text = "\n".join(item_lines) if item_lines else "  • Pizza Items"
 
     bot_fee = get_bot_fee(db)
     total_payable = subtotal + bot_fee
 
-    item_lines = []
-    for pid_str, raw_qty in list(cart.items()):
-        qty = parse_cart_quantity(raw_qty)
-        p = resolve_cart_item_product(db, pid_str)
-        if p:
-            price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
-            veg_dot = "🟢" if p.is_veg else "🔴"
-            item_lines.append(f"  {veg_dot} <b>{p.name}</b> ×{qty}" if active_deal else f"  {veg_dot} <b>{p.name}</b> ×{qty}  —  ₹{price * qty:.0f}")
-    items_text = "\n".join(item_lines) if item_lines else "  • Pizza Items"
+    wallet_bal = user.wallet_balance or 0.0
+    wallet_usable = min(wallet_bal, total_payable)
+    remaining_upi = total_payable - wallet_usable
 
-    # Order note (delivery_instructions)
+    if wallet_usable >= total_payable:
+        pay_info = f"💳 <b>Payment Mode: Full Wallet Deduction</b>\n  └ <b>₹{total_payable:.2f}</b> will be deducted from your wallet balance (Balance: ₹{wallet_bal:.2f})"
+    elif wallet_usable > 0:
+        pay_info = f"🌗 <b>Payment Mode: Partial Wallet + UPI</b>\n  └ <b>₹{wallet_usable:.2f}</b> deducted from wallet + <b>₹{remaining_upi:.2f}</b> payable via UPI QR"
+    else:
+        pay_info = f"📱 <b>Payment Mode: Direct UPI QR Code</b>\n  └ <b>₹{total_payable:.2f}</b> payable via UPI QR"
+
     order_note = session.get("order_note", "")
     note_line = f"\n✏️ <b>Order Note:</b> <i>{order_note}</i>" if order_note else ""
     note_btn_label = "✏️ Edit Note" if order_note else "📝 Add Note to Order"
+
+    addr_disp = escape_html(address) if address else "Not provided"
+    phone_disp = escape_html(phone) if phone else "Not provided"
 
     confirm_text = (
         "📋 <b>Review Your Order</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"🛒 <b>Items:</b>\n{items_text}\n\n"
-        f"🏠 <b>Delivery Address:</b> {address}\n"
-        f"📱 <b>Phone:</b> {phone}"
+        f"🏠 <b>Delivery Address:</b> <code>{addr_disp}</code>\n"
+        f"📱 <b>Phone:</b> <code>{phone_disp}</code>"
         f"{note_line}\n\n"
         "💰 <b>Price Breakdown:</b>\n"
-        f"  Pizza Total:      ₹{subtotal:.2f}\n"
+        f"  Item Subtotal:    ₹{subtotal:.2f}\n"
         f"  Bot Service Fee:  +₹{bot_fee:.2f}\n"
         "  ─────────────────────\n"
         f"  <b>Total Payable:  ₹{total_payable:.2f}</b>\n\n"
-        f"💳 <i>Your Wallet Balance: ₹{user.wallet_balance:.2f}</i>\n\n"
-        "Select your preferred payment method below:"
+        f"{pay_info}\n\n"
+        "Select your preferred payment method below to finalize:"
     )
+    
+    btn_wallet_label = f"💳 Pay via Wallet (₹{wallet_usable:.0f})" if wallet_usable > 0 else f"💳 Wallet (₹{wallet_bal:.0f} - Low)"
     confirm_markup = {
         "inline_keyboard": [
             [
-                {"text": f"💳 Pay via Wallet (₹{user.wallet_balance:.0f})", "callback_data": "order_confirm_place_wallet"},
-                {"text": "📱 Pay via UPI QR Code",                     "callback_data": "order_confirm_place_direct_qr"}
+                {"text": btn_wallet_label, "callback_data": "order_confirm_place_wallet"},
+                {"text": "📱 Pay via UPI QR Code", "callback_data": "order_confirm_place_direct_qr"}
             ],
             [
-                {"text": note_btn_label,       "callback_data": "checkout_add_note"},
-                {"text": "✏️ Edit Details",  "callback_data": "checkout_edit_details"}
+                {"text": note_btn_label, "callback_data": "checkout_add_note"},
+                {"text": "✏️ Edit Details", "callback_data": "checkout_edit_details"}
             ],
             [
-                {"text": "❌ Cancel Order",  "callback_data": "order_cancel_place"}
+                {"text": "❌ Cancel Order", "callback_data": "order_cancel_place"}
             ]
         ]
     }
@@ -4556,101 +4707,7 @@ def resolve_cart_item_product(db: Session, key: str):
     return db.query(Product).first()
 
 
-def render_cart_message(db: Session, user: User, cart: dict, session: dict = None):
-    """Generates the shopping cart item lines and dynamic checkout keyboard."""
-    if not cart:
-        return "🛒 <b>Your Cart is empty!</b>\n\nClick below to view our menu and start ordering pizzas.", {
-            "inline_keyboard": [[{"text": "🍕 View Menu", "callback_data": "menu_view"}]]
-        }
-        
-    lines = ["🛒 <b>Your Current Shopping Cart:</b>\n"]
-    subtotal = 0.0
-    inline_keyboard = []
 
-    multiplier = 1.0
-    delivery_charge = 30.0
-            
-    active_deal = session.get("active_deal") if session else None
-    if active_deal:
-        deal_price = session.get("deal_price", 0.0)
-        if active_deal == "deal_1":
-            lines.append("🔥 <b>Active Deal: Double Cheeseburst Feast</b> (₹410.00)")
-        elif active_deal == "deal_2":
-            lines.append("🔥 <b>Active Deal: Veggie Duo Deal</b> (₹90.00)")
-        elif active_deal == "deal_3":
-            lines.append("🔥 <b>Active Deal: Classic Pizza Duo</b> (₹150.00)")
-    
-    for product_id_str, raw_qty in list(cart.items()):
-        qty = parse_cart_quantity(raw_qty)
-        p = resolve_cart_item_product(db, product_id_str)
-        if not p:
-            continue
-        price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
-        item_total = price * qty
-        if not active_deal:
-            subtotal += item_total
-        
-        lines.append(f"• <b>{p.name}</b> (x{qty}) — ₹{price:.0f} ea. = <b>₹{item_total:.0f}</b>")
-        
-        # Incrementor/decrementor/delete row
-        inline_keyboard.append([
-            {"text": "➖", "callback_data": f"cart_sub_{p.id}"},
-            {"text": f"🍕 {p.name} (x{qty})", "callback_data": "cart_view"},
-            {"text": "➕", "callback_data": f"cart_add_{p.id}"},
-            {"text": "🗑️", "callback_data": f"cart_del_{p.id}"}
-        ])
-        
-    if active_deal:
-        subtotal = deal_price
-        
-    # Fetch bot service fee
-    bot_fee = get_bot_fee(db)
-    total_payable = subtotal + bot_fee
-    
-    # Proactive Deal suggestions
-    suggestions = []
-    if not active_deal:
-        cart_product_names = {}
-        for p_id_str, qty in cart.items():
-            p = db.query(Product).filter(Product.id == p_id_str).first()
-            if p:
-                cart_product_names[p.name] = qty
-                
-        has_paneer = "Paneer & Capsicum" in cart_product_names
-        has_corn = any("corn" in name.lower() for name in cart_product_names.keys())
-        
-        has_margherita = any("margherita" in name.lower() for name in cart_product_names.keys())
-        has_tomato = any("tomato" in name.lower() or "onion" in name.lower() for name in cart_product_names.keys())
-        
-        if (has_paneer or has_corn) and not (has_paneer and has_corn):
-            missing = "Golden Corn Pizza" if has_paneer else "Paneer & Capsicum Pizza"
-            suggestions.append(f"💡 <i>Tip: Add a <b>{missing}</b> to unlock the Veggie Duo Deal (2 pizzas for ₹90)!</i>")
-        elif has_paneer and has_corn:
-            suggestions.append("🎉 <i>You qualify for the <b>Veggie Duo Deal</b>! Go to 'Active Offers' to apply it for ₹90.</i>")
-            
-        if (has_margherita or has_tomato) and not (has_margherita and has_tomato):
-            missing = "Tomato Onion Pizza" if has_margherita else "Margherita Classic Pizza"
-            suggestions.append(f"💡 <i>Tip: Add a <b>{missing}</b> to unlock the Classic Pizza Duo Deal (2 pizzas for ₹150)!</i>")
-        elif has_margherita and has_tomato:
-            suggestions.append("🎉 <i>You qualify for the <b>Classic Pizza Duo Deal</b>! Go to 'Active Offers' to apply it for ₹150.</i>")
-            
-    if suggestions:
-        lines.append("\n" + "\n".join(suggestions))
-    
-    lines.append(f"\n💵 <b>Pizza Total:</b> ₹{subtotal:.2f}")
-    lines.append(f"🤖 <b>Bot Service Fee:</b> ₹{bot_fee:.2f}")
-    lines.append(f"💳 <b>Total Payable:</b> <b>₹{total_payable:.2f}</b>")
-    lines.append(f"\n💰 <b>Your Wallet Balance:</b> ₹{user.wallet_balance:.2f}")
-    
-    action_row = [
-        {"text": "❌ Clear Cart", "callback_data": "cart_empty"},
-        {"text": "🍕 View Menu", "callback_data": "menu_view"}
-    ]
-    inline_keyboard.append(action_row)
-    
-    inline_keyboard.append([{"text": "🛍️ Proceed to Checkout", "callback_data": "cart_checkout"}])
-        
-    return "\n".join(lines), {"inline_keyboard": inline_keyboard}
 
 async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, last_name: str, username: str, data: str, message_id: int, callback_query_id: str):
     """Processes interactive inline button actions by editing messages on the user's screen."""
@@ -5047,51 +5104,36 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await answer_callback_query(callback_query_id)
         
     elif data.startswith("cart_add_"):
-        product_id = data[len("cart_add_"):]  # Full UUID string
-        p = db.query(Product).filter(Product.id == product_id).first()
-        if not p:
-            await answer_callback_query(callback_query_id, "Product not found!")
-            return
-            
-        cart = session["cart"]
-        cart[product_id] = cart.get(product_id, 0) + 1
-        session["active_deal"] = None
+        key_str = data[len("cart_add_"):]
+        cart = session.setdefault("cart", {})
+        cart[key_str] = cart.get(key_str, 0) + 1
         
-        await answer_callback_query(callback_query_id, f"Added 1x {p.name}")
+        _, _, item_name, _, _ = resolve_cart_item(db, key_str)
+        await answer_callback_query(callback_query_id, f"Added 1x {item_name}")
         cart_text, cart_markup = render_cart_message(db, user, cart, session)
         await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
         
     elif data.startswith("cart_sub_"):
-        product_id = data[len("cart_sub_"):]  # Full UUID string
-        p = db.query(Product).filter(Product.id == product_id).first()
-        if not p:
-            await answer_callback_query(callback_query_id, "Product not found!")
-            return
-            
-        cart = session["cart"]
-        if product_id in cart:
-            cart[product_id] -= 1
-            if cart[product_id] <= 0:
-                del cart[product_id]
-        session["active_deal"] = None
+        key_str = data[len("cart_sub_"):]
+        cart = session.setdefault("cart", {})
+        if key_str in cart:
+            cart[key_str] -= 1
+            if cart[key_str] <= 0:
+                del cart[key_str]
                 
-        await answer_callback_query(callback_query_id, f"Removed 1x {p.name}")
+        _, _, item_name, _, _ = resolve_cart_item(db, key_str)
+        await answer_callback_query(callback_query_id, f"Updated {item_name}")
         cart_text, cart_markup = render_cart_message(db, user, cart, session)
         await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
         
     elif data.startswith("cart_del_"):
-        product_id = data[len("cart_del_"):]  # Full UUID string
-        p = db.query(Product).filter(Product.id == product_id).first()
-        if not p:
-            await answer_callback_query(callback_query_id, "Product not found!")
-            return
+        key_str = data[len("cart_del_"):]
+        cart = session.setdefault("cart", {})
+        if key_str in cart:
+            del cart[key_str]
             
-        cart = session["cart"]
-        if product_id in cart:
-            del cart[product_id]
-        session["active_deal"] = None
-            
-        await answer_callback_query(callback_query_id, f"Removed {p.name} from cart")
+        _, _, item_name, _, _ = resolve_cart_item(db, key_str)
+        await answer_callback_query(callback_query_id, f"Removed {item_name} from cart")
         cart_text, cart_markup = render_cart_message(db, user, cart, session)
         await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
         
@@ -8311,17 +8353,13 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         multiplier = 1.0
         delivery_charge = 30.0
 
-        active_deal = session.get("active_deal")
-        if active_deal:
-            subtotal = session.get("deal_price", 0.0)
-        else:
-            subtotal = 0.0
-            for product_id_str, raw_qty in cart.items():
-                qty = parse_cart_quantity(raw_qty)
-                p = resolve_cart_item_product(db, product_id_str)
-                if p:
-                    price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
-                    subtotal += (price * qty)
+        subtotal = 0.0
+        for key_str, raw_qty in cart.items():
+            qty = parse_cart_quantity(raw_qty)
+            if qty <= 0:
+                continue
+            item_type, obj, item_name, unit_price, items_breakdown = resolve_cart_item(db, key_str)
+            subtotal += (unit_price * qty)
                 
         # Fetch bot service fee
         bot_fee = get_bot_fee(db)
@@ -8330,24 +8368,36 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         coupon = ""
         delivery_charge = bot_fee
         
+        wallet_bal = user.wallet_balance or 0.0
         is_direct_qr = (data == "order_confirm_place_direct_qr")
-        is_insufficient = (user.wallet_balance < total_payable) if not is_direct_qr else True
         
-        if not is_direct_qr and not is_insufficient:
-            # Deduct wallet balance for wallet payment
-            user.wallet_balance -= total_payable
+        if is_direct_qr:
+            wallet_usable = 0.0
+            remaining_upi = total_payable
+        else:
+            wallet_usable = min(wallet_bal, total_payable)
+            remaining_upi = total_payable - wallet_usable
+
+        if wallet_usable > 0:
+            user.wallet_balance -= wallet_usable
+            tx_desc = f"💳 Paid ₹{wallet_usable:.2f} for Order #{order_id}" if remaining_upi == 0 else f"🌗 Paid ₹{wallet_usable:.2f} from wallet for Order #{order_id} (₹{remaining_upi:.2f} UPI remaining)"
             tx = WalletTransaction(
                 user_id=user.id,
                 type="payment",
-                amount=-total_payable,
-                description=f"Paid for order: {order_id}"
+                amount=-wallet_usable,
+                description=tx_desc
             )
             db.add(tx)
+
+        if remaining_upi <= 0:
             initial_status = "Payment Received"
             payment_method_lbl = "wallet"
+        elif wallet_usable > 0:
+            initial_status = "Pending Payment"
+            payment_method_lbl = "partial_wallet_upi"
         else:
             initial_status = "Pending Payment"
-            payment_method_lbl = "direct_upi" if is_direct_qr else "wallet_pending"
+            payment_method_lbl = "direct_upi"
         
         # Place order in DB with dynamic values
         order_note = session.get("order_note", "") or ""
@@ -8359,6 +8409,8 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             discount=discount,
             delivery_charge=delivery_charge,
             total_payable=total_payable,
+            wallet_applied=wallet_usable,
+            upi_paid=remaining_upi,
             payment_method=payment_method_lbl,
             status=initial_status,
             address=address,
@@ -8374,17 +8426,27 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         db.add(order)
         db.flush()
         
-        # Save OrderItems to DB
-        for product_id_str, raw_qty in cart.items():
+        # Save OrderItems to DB for both regular products and Active Offers
+        for key_str, raw_qty in cart.items():
             qty = parse_cart_quantity(raw_qty)
-            p = resolve_cart_item_product(db, product_id_str)
-            if p:
-                price = float(round((p.discounted_price if p.discounted_price is not None else p.original_price) * multiplier))
+            if qty <= 0:
+                continue
+            item_type, obj, item_name, unit_price, items_breakdown = resolve_cart_item(db, key_str)
+            if item_type == "offer":
+                p = db.query(Product).first()
                 item = OrderItem(
                     order_id=order_id,
-                    product_id=p.id,
+                    product_id=p.id if p else None,
                     quantity=qty,
-                    price=price
+                    price=unit_price
+                )
+                db.add(item)
+            elif item_type == "product" and obj:
+                item = OrderItem(
+                    order_id=order_id,
+                    product_id=obj.id,
+                    quantity=qty,
+                    price=unit_price
                 )
                 db.add(item)
 

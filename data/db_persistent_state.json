@@ -1,10 +1,10 @@
 {
-  "version": 1.1,
-  "saved_at": "2026-09-11T14:22:21.075005+00:00",
+  "version": 1.2,
+  "saved_at": "2026-09-11T15:30:18.734756+00:00",
   "users": [
     {
-      "id": "32f29c8f-1d2c-4fd3-bb70-9d756788b540",
-      "telegram_id": "111222",
+      "id": "1cf5f9f0-b9cd-4793-931c-a2860613f9de",
+      "telegram_id": "777666",
       "username": "admin",
       "display_name": "Super Admin",
       "phone": null,
@@ -17,24 +17,24 @@
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-11T14:22:20.128797"
+      "created_at": "2026-09-11T15:30:17.114737"
     },
     {
-      "id": "7b937a9e-52c9-4ea8-b265-6a233bf0aef0",
-      "telegram_id": "999000111",
-      "username": "loc_user",
-      "display_name": "Loc User",
+      "id": "c799e651-22f0-4806-9a2c-1af3bb86b0a3",
+      "telegram_id": "777888",
+      "username": "stackeruser",
+      "display_name": "Stacker User",
       "phone": null,
       "city": "Mumbai",
-      "address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
-      "latitude": 19.1197,
-      "longitude": 72.8464,
-      "wallet_balance": 0.0,
+      "address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "wallet_balance": 250.0,
       "is_admin": false,
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-11T14:22:20.146670"
+      "created_at": "2026-09-11T15:30:17.121965"
     }
   ],
   "saved_addresses": [
@@ -97,9 +97,378 @@
       "longitude": 72.8464,
       "city": "Mumbai",
       "is_default": true
+    },
+    {
+      "id": "0e3651f0-38d4-4a4b-bb7b-928e9b38df17",
+      "user_id": "6408017e-6c45-476c-b8dd-38ec9c10efdd",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "569bf48c-a0fc-4a4c-a214-3793f47b5b4d",
+      "user_id": "7da2421a-ae73-4332-bc7a-aa3823be2baa",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "13aa46ec-0356-4488-a3e8-ccedb02d67e6",
+      "user_id": "a817b29b-de56-4de2-8b12-bf5ae10b8797",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "87fce322-193d-48d6-9425-6287fbe35791",
+      "user_id": "2407873f-b946-411f-9257-d9ebaae89748",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "e733e0af-89ee-43e9-9348-8e4e4c33bf6d",
+      "user_id": "6d8f9092-a0c3-42dd-9b07-099ec59c222d",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "d08d1621-392d-45e5-84d8-3543714c2314",
+      "user_id": "71c5c6f3-6c2e-4823-83de-c199ad9c91d4",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "eb9a0f6e-dc77-420f-ba90-828b39ee2fab",
+      "user_id": "f236cc51-c940-404a-9f8d-6b0b03a97295",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "c938d71a-1a7c-45d6-8131-49a7acb41c55",
+      "user_id": "56c91db9-de02-4bae-8562-fa0a86d421c3",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "821b7ded-da17-4902-b15c-5294e981a769",
+      "user_id": "cd270b20-4cb4-4c13-aed6-5eb26fa30e63",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "dbe5bcd6-1a8a-4910-9f76-8f2953567b08",
+      "user_id": "37f2310d-b4e5-41b7-bc05-08f27fe0bd36",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "e3c56a9f-8cb3-4b23-8a50-17d8f2bebb38",
+      "user_id": "0d1970ce-967b-4539-bc3c-ce3698661ff7",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "8626ed64-c8c3-46c1-802a-69296b2878af",
+      "user_id": "8277bf3d-e7a6-4e03-8798-887fd7fd3145",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "fa9923d8-3830-4b54-9b76-254ab4ef5fe5",
+      "user_id": "2d39dff5-ede7-4632-a514-107be0414e38",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "6d8b3101-1005-42c8-b8e5-de5247175adb",
+      "user_id": "0cd57290-6017-4370-9607-0de7063256f3",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "71c4a998-df3e-453f-a9ea-5f31d76c958d",
+      "user_id": "352c3a90-27eb-4d1d-b5d4-168624c76f7b",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "153b2add-5707-4a39-92f1-aab11252c56d",
+      "user_id": "17f8590b-4d0b-4f64-8408-2df1d9cfe22d",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "3f8a0336-65c2-4471-b80e-9ac19a1d94f3",
+      "user_id": "48530354-a0f9-4a4b-81ab-dc210202731d",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "b5f06709-619e-42a4-9f70-e1dc32070c94",
+      "user_id": "517133f0-c031-48f0-99ec-a2f836048cfa",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "86f13b26-f2b3-4532-8976-f5c096b3c99a",
+      "user_id": "932e9c6f-4db6-4a69-8d1b-4adb2a321d87",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "0958948b-7e56-4b33-ac31-fbb116069942",
+      "user_id": "246ac345-a1c8-408d-90e7-c1325ea9c736",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "0cfc11a6-01ea-4aba-92fd-306a97f5c4b9",
+      "user_id": "45990381-ef00-4059-b95f-c3896485978e",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "29728997-6f40-497c-8da6-59f46f563371",
+      "user_id": "ca7363d7-19d3-4d4f-8d91-5130408c5619",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "7539f577-2e91-4db7-8fcb-7d95d215164b",
+      "user_id": "ca810d50-d02d-4761-9991-51204154b887",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "7cfe602d-ac5f-45ef-8a33-602a83a0eb72",
+      "user_id": "af6a236e-4975-41d0-8742-ef3b52c931bf",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "629e82ea-c7f7-40e0-9ed3-3a02c6019e99",
+      "user_id": "c799e651-22f0-4806-9a2c-1af3bb86b0a3",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
     }
   ],
   "orders": [],
   "wallet_transactions": [],
-  "coupons": []
+  "coupons": [],
+  "offers": [
+    {
+      "id": "1d72ca26-6a8f-4680-a95d-b46b146fa9df",
+      "offer_key": "deal_1",
+      "title": "\ud83d\udd25 2x Medium Non-Veg Pizza Combo",
+      "badge": "\u26a1 BEST VALUE",
+      "description": "2 Medium Non-Veg Pizzas of your choice for just \u20b9410!",
+      "discounted_price": 410.0,
+      "original_price": 650.0,
+      "button_text": "\ud83d\uded2 Grab Deal 1 @ \u20b9410",
+      "is_active": true,
+      "sort_order": 1,
+      "items_json": "[{\"category\": \"Non-Veg\", \"size\": \"Medium\", \"qty\": 2}]"
+    },
+    {
+      "id": "ca240b55-5a97-4d9e-88cb-ebfa7314603f",
+      "offer_key": "deal_2",
+      "title": "\ud83c\udf89 2x Medium Veg Pizza Combo",
+      "badge": "\ud83c\udf89 POPULAR",
+      "description": "2 Medium Veg Pizzas of your choice for just \u20b9320!",
+      "discounted_price": 320.0,
+      "original_price": 520.0,
+      "button_text": "\ud83d\uded2 Grab Deal 2 @ \u20b9320",
+      "is_active": true,
+      "sort_order": 2,
+      "items_json": "[{\"category\": \"Veg\", \"size\": \"Medium\", \"qty\": 2}]"
+    },
+    {
+      "id": "d4f81486-1c24-498f-b274-392e67e81035",
+      "offer_key": "deal_3",
+      "title": "\ud83c\udf55 2x Regular Margherita Deal",
+      "badge": "\u2b50 CLASSIC",
+      "description": "2 Regular Margherita Pizzas for just \u20b9240!",
+      "discounted_price": 240.0,
+      "original_price": 350.0,
+      "button_text": "\ud83d\uded2 Grab Deal 3 @ \u20b9240",
+      "is_active": true,
+      "sort_order": 3,
+      "items_json": "[{\"name\": \"Margherita\", \"size\": \"Regular\", \"qty\": 2}]"
+    },
+    {
+      "id": "c4dcd4da-15e1-4eaa-bf95-6e46933216ba",
+      "offer_key": "deal_4",
+      "title": "\ud83c\udf36\ufe0f 2x Regular Fresh Veggie Deal",
+      "badge": "\ud83c\udf36\ufe0f SPICY DEALS",
+      "description": "2 Regular Fresh Veggie (Paneer & Capsicum) for just \u20b9105!",
+      "discounted_price": 105.0,
+      "original_price": 220.0,
+      "button_text": "\ud83d\uded2 Grab Deal 4 @ \u20b9105",
+      "is_active": true,
+      "sort_order": 4,
+      "items_json": "[{\"name\": \"Paneer\", \"qty\": 1}, {\"name\": \"Capsicum\", \"qty\": 1}]"
+    },
+    {
+      "id": "1a0a1608-ef50-4dc8-9543-942366eaf638",
+      "offer_key": "deal_5a",
+      "title": "\ud83e\uddc5 3x Onion Veggie Deal",
+      "badge": "\ud83e\uddc5 BUDGET SPECIAL",
+      "description": "3 Single Topping Onion Pizzas for just \u20b9100!",
+      "discounted_price": 100.0,
+      "original_price": 180.0,
+      "button_text": "\ud83d\uded2 Grab Deal 5A @ \u20b9100",
+      "is_active": true,
+      "sort_order": 5,
+      "items_json": "[{\"name\": \"Onion\", \"qty\": 3}]"
+    },
+    {
+      "id": "dd4873a1-7e94-45d9-a44a-686a69425306",
+      "offer_key": "deal_5b",
+      "title": "\ud83c\udf45 4x Classic Tomato/Capsicum Deal",
+      "badge": "\ud83c\udf45 MEGA SAVER",
+      "description": "4 Single Topping Classic Pizzas for just \u20b990!",
+      "discounted_price": 90.0,
+      "original_price": 240.0,
+      "button_text": "\ud83d\uded2 Grab Deal 5B @ \u20b990",
+      "is_active": true,
+      "sort_order": 6,
+      "items_json": "[{\"name\": \"Classic\", \"qty\": 4}]"
+    },
+    {
+      "id": "12fea595-1f1c-4951-88e6-007cd3e1a5c5",
+      "offer_key": "deal_6",
+      "title": "\ud83c\udf57 2x Chicken Sausage Special",
+      "badge": "\ud83c\udf57 MEAT LOVER",
+      "description": "2 Non-Veg Chicken Sausage Pizzas for just \u20b9105!",
+      "discounted_price": 105.0,
+      "original_price": 220.0,
+      "button_text": "\ud83d\uded2 Grab Deal 6 @ \u20b9105",
+      "is_active": true,
+      "sort_order": 7,
+      "items_json": "[{\"name\": \"Chicken Sausage\", \"qty\": 2}]"
+    },
+    {
+      "id": "3d63bc21-eabb-4eb4-b863-7bc080e7a5ce",
+      "offer_key": "deal_bot_edit_test",
+      "title": "Bot Edit Test Deal",
+      "badge": "\ud83d\udd25 50% OFF",
+      "description": null,
+      "discounted_price": 299.0,
+      "original_price": 200.0,
+      "button_text": "\ud83d\uded2 Bot Edit Test Deal (\u20b9299)",
+      "is_active": true,
+      "sort_order": 0,
+      "items_json": null
+    },
+    {
+      "id": "3f76e76d-f332-47ab-94d1-72cc1458973f",
+      "offer_key": "deal_rich_combo",
+      "title": "Party Fiesta Combo",
+      "badge": "\u26a1 50% OFF",
+      "description": "Complete pizza party package",
+      "discounted_price": 499.0,
+      "original_price": 1000.0,
+      "button_text": "\ud83d\uded2 Grab Party Fiesta Combo (\u20b9499)",
+      "is_active": true,
+      "sort_order": 1,
+      "items_json": "[{\"name\": \"Margherita Pizza\", \"size\": \"Medium (10\\\")\", \"qty\": 2}, {\"name\": \"Garlic Breadsticks\", \"size\": \"Standard\", \"qty\": 1}, {\"name\": \"Pepsi\", \"size\": \"475ml\", \"qty\": 1}]"
+    }
+  ]
 }
