@@ -1496,6 +1496,7 @@ class TestPizzaPlatform(unittest.TestCase):
 
     def test_25_ui_conversions_custom_deposit_and_offer_edits(self):
         """Tests Custom Amount input parsing, ForceReply placeholders, and Bot offer price/badge editing."""
+        import asyncio
         from backend.bot import handle_bot_message, USER_BOT_SESSION
         from backend.database import User, ActiveOffer
         
