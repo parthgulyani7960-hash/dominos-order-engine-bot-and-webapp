@@ -1086,23 +1086,43 @@ async def display_delivery_location_menu(db: Session, user: User):
         phone_line = f"\n📱 <b>Phone Number:</b> ⚠️ <b>NOT SET</b>\n  └ <i>10-digit mobile number required for order updates</i>"
         phone_btn_text = "⚠️ 📱 Enter Mobile Number"
 
+    has_cart = bool(session.get("cart"))
+    all_confirmed = (has_gps and has_addr and has_phone)
+    
     loc_msg = (
         f"📍 <b>Delivery Location & Details</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"{coord_line}"
         f"{addr_line}"
         f"{phone_line}\n\n"
-        "<i>Note: Your GPS coordinates, written doorstep address, and contact details are stored for accurate Domino's delivery.</i>\n\n"
-        "Choose an option below to update any setting:"
     )
+
+    if all_confirmed:
+        if has_cart:
+            confirm_btn_text = "✅ Confirm Details & Return to Cart"
+            loc_msg += "✅ <b>All delivery details confirmed!</b> Tap below to proceed directly to your shopping cart/checkout."
+        else:
+            confirm_btn_text = "✅ Confirm Location & View Menu"
+            loc_msg += "✅ <b>All delivery details confirmed!</b> You are ready to order."
+    else:
+        confirm_btn_text = "🛒 Return to Cart" if has_cart else "🍕 View Pizza Menu"
+        loc_msg += "<i>Please complete any missing details marked with ⚠️/🔴 below to enable delivery:</i>"
+
+    keyboard_rows = []
+    if all_confirmed:
+        keyboard_rows.append([{"text": confirm_btn_text}])
     
+    keyboard_rows.append([{"text": gps_btn_text, "request_location": True}])
+    keyboard_rows.append([{"text": addr_btn_text}])
+    keyboard_rows.append([{"text": phone_btn_text}])
+    
+    if not all_confirmed:
+        keyboard_rows.append([{"text": confirm_btn_text}])
+        
+    keyboard_rows.append([{"text": "🔙 Back"}])
+
     loc_options_keyboard = {
-        "keyboard": [
-            [{"text": gps_btn_text, "request_location": True}],
-            [{"text": addr_btn_text}],
-            [{"text": phone_btn_text}],
-            [{"text": "🔙 Back"}]
-        ],
+        "keyboard": keyboard_rows,
         "resize_keyboard": True,
         "one_time_keyboard": False
     }
@@ -2214,8 +2234,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             session["checkout_pending"] = False
             cart = session.get("cart", {})
             if cart:
-                cart_text, cart_markup = render_cart_message(db, user, cart, session)
-                await send_bot_message(user.telegram_id, "❌ <b>Action cancelled.</b> Returning to cart:\n\n" + cart_text, reply_markup=cart_markup)
+                await initiate_checkout(db, user, session)
             else:
                 await send_bot_message(user.telegram_id, "❌ <b>Action cancelled.</b>", reply_markup=main_keyboard)
         else:
@@ -2416,7 +2435,21 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 await notify_admins(db, admin_text, reply_markup=action_markup)
             return
 
-    if text_clean in ("🏠 Update Delivery Address", "update delivery address"):
+    if text_clean in (
+        "✅ Confirm Details & Return to Cart", "✅ Confirm Location & View Menu",
+        "🛒 Return to Cart", "✅ Confirm Details", "✅ Confirm Location"
+    ):
+        session["state"] = None
+        if session.get("cart"):
+            await initiate_checkout(db, user, session)
+        else:
+            await display_pizza_menu(db, user, reply_markup=main_keyboard)
+        return
+
+    if text_clean in (
+        "🏠 Edit Delivery Address", "⚠️ 🏠 Enter Doorstep Address",
+        "🏠 Update Delivery Address", "update delivery address", "update doorstep address"
+    ):
         session["state"] = "waiting_for_address_update"
         await send_bot_message(
             user.telegram_id,
@@ -2427,7 +2460,10 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         )
         return
 
-    if text_clean in ("📱 Update Phone Number", "update phone number"):
+    if text_clean in (
+        "📱 Edit Phone Number", "⚠️ 📱 Enter Mobile Number",
+        "📱 Update Phone Number", "update phone number"
+    ):
         session["state"] = "waiting_for_phone_update"
         current_phone = f"Current phone: <code>{user.phone}</code>\n\n" if user.phone else ""
         await send_bot_message(
