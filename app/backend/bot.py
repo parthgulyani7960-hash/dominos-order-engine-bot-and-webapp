@@ -1383,11 +1383,14 @@ def render_admin_command_center(db: Session) -> tuple[str, dict]:
                 {"text": "🎟️ Manage Promo Codes", "callback_data": "admin_promo_menu"}
             ],
             [
-                {"text": "⚙️ System Config", "callback_data": "admin_sys_config"},
-                {"text": "📢 Broadcast Message", "callback_data": "admin_broadcast_menu"}
+                {"text": "🎉 Manage Active Offers", "callback_data": "admin_offers_menu"},
+                {"text": "⚙️ System Config", "callback_data": "admin_sys_config"}
             ],
             [
-                {"text": "📊 Reports & Backup", "callback_data": "admin_reports_menu"},
+                {"text": "📢 Broadcast Message", "callback_data": "admin_broadcast_menu"},
+                {"text": "📊 Reports & Backup", "callback_data": "admin_reports_menu"}
+            ],
+            [
                 {"text": "⚠️ View Error Logs", "callback_data": "admin_view_error_logs"}
             ]
         ]
@@ -2642,6 +2645,68 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         buttons.append([{"text": "🔙 Back to Payment Management", "callback_data": "admin_payment_management"}])
         await send_bot_message(user.telegram_id, msg, reply_markup={"inline_keyboard": buttons})
         session["state"] = None
+        return
+
+    elif session.get("state") == "admin_waiting_offer_title":
+        if not is_admin:
+            await send_bot_message(user.telegram_id, "❌ Unauthorized!")
+            return
+        title = text.strip()
+        if len(title) < 3:
+            await send_bot_message(user.telegram_id, "❌ Title too short. Please enter a valid deal title:")
+            return
+        session["new_offer_title"] = title
+        session["state"] = "admin_waiting_offer_price"
+        await send_bot_message(
+            user.telegram_id,
+            f"✅ <b>Title saved:</b> <code>{escape_html(title)}</code>\n\n"
+            f"Please enter the discounted price in ₹ (e.g. <code>199</code>):",
+            reply_markup={"keyboard": [[{"text": "❌ Cancel"}]], "resize_keyboard": True, "one_time_keyboard": True}
+        )
+        return
+
+    elif session.get("state") == "admin_waiting_offer_price":
+        if not is_admin:
+            await send_bot_message(user.telegram_id, "❌ Unauthorized!")
+            return
+        try:
+            price = float(text_clean)
+            if price <= 0:
+                raise ValueError()
+        except ValueError:
+            await send_bot_message(user.telegram_id, "❌ Invalid price. Please enter a positive number (e.g. <code>199</code>):")
+            return
+
+        import uuid
+        title = session.get("new_offer_title", "New Deal")
+        key = f"deal_{uuid.uuid4().hex[:6]}"
+        
+        new_offer = ActiveOffer(
+            offer_key=key,
+            title=title,
+            badge="🔥 NEW",
+            description=f"{title} - Discounted deal",
+            discounted_price=price,
+            original_price=price * 1.5,
+            button_text=f"🛒 {title[:25]} (₹{price:.0f})",
+            is_active=True,
+            sort_order=0
+        )
+        db.add(new_offer)
+        db.commit()
+        
+        session["state"] = None
+        session["new_offer_title"] = None
+        
+        await send_bot_message(
+            user.telegram_id,
+            f"🎉 <b>New Offer Created Successfully!</b>\n\n"
+            f"• Title: <b>{escape_html(title)}</b>\n"
+            f"• Price: <b>₹{price:.2f}</b>\n"
+            f"• Key: <code>{key}</code>\n\n"
+            f"This offer is now live for all customers!",
+            reply_markup=main_keyboard
+        )
         return
 
     elif session.get("state") == "waiting_for_topup_amount":
@@ -5588,6 +5653,126 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await send_bot_message(
             user.telegram_id,
             "💰 <b>Manual Wallet Credit:</b>\n\nPlease enter the Username (e.g. <code>@name</code>), Display Name, or Telegram ID of the user you want to credit funds to:",
+            reply_markup=cancel_keyboard
+        )
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data == "admin_offers_menu":
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        
+        offers = db.query(ActiveOffer).order_by(ActiveOffer.sort_order.asc()).all()
+        
+        if not offers:
+            msg = (
+                "🎉 <b>Active Offers & Deals Management</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "<i>No promotional deals found in database. Click below to add a new deal!</i>"
+            )
+            buttons = [
+                [{"text": "➕ Create New Deal", "callback_data": "admin_offer_create_start"}],
+                [{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}]
+            ]
+        else:
+            msg = (
+                "🎉 <b>Active Offers & Deals Management</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "<i>Manage all live deals and promotional combos shown to customers:</i>\n\n"
+            )
+            buttons = []
+            for off in offers:
+                status_icon = "🟢 ACTIVE" if off.is_active else "🔴 DISABLED"
+                badge_str = f" [{off.badge}]" if off.badge else ""
+                msg += f"• <b>{escape_html(off.title)}</b>{badge_str} ({status_icon})\n  └ Price: <b>₹{off.discounted_price:.2f}</b> | Key: <code>{off.offer_key}</code>\n\n"
+                
+                toggle_txt = "🔴 Disable" if off.is_active else "🟢 Enable"
+                buttons.append([
+                    {"text": f"{toggle_txt} ({off.offer_key[:12]})", "callback_data": f"admin_offer_toggle_{off.id}"},
+                    {"text": f"❌ Delete", "callback_data": f"admin_offer_del_{off.id}"}
+                ])
+            
+            buttons.append([{"text": "➕ Create New Deal", "callback_data": "admin_offer_create_start"}])
+            buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
+
+        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data.startswith("admin_offer_toggle_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        off_id = data.replace("admin_offer_toggle_", "").strip()
+        off = db.query(ActiveOffer).filter((ActiveOffer.id == off_id) | (ActiveOffer.offer_key == off_id)).first()
+        if off:
+            off.is_active = not off.is_active
+            db.commit()
+            await answer_callback_query(callback_query_id, f"Offer status changed: {'ACTIVE' if off.is_active else 'DISABLED'}")
+        else:
+            await answer_callback_query(callback_query_id, "Offer not found!")
+        
+        offers = db.query(ActiveOffer).order_by(ActiveOffer.sort_order.asc()).all()
+        msg = "🎉 <b>Active Offers & Deals Management</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        buttons = []
+        for o in offers:
+            status_icon = "🟢 ACTIVE" if o.is_active else "🔴 DISABLED"
+            msg += f"• <b>{escape_html(o.title)}</b> ({status_icon})\n  └ Price: <b>₹{o.discounted_price:.2f}</b>\n\n"
+            toggle_txt = "🔴 Disable" if o.is_active else "🟢 Enable"
+            buttons.append([
+                {"text": f"{toggle_txt} ({o.offer_key[:12]})", "callback_data": f"admin_offer_toggle_{o.id}"},
+                {"text": f"❌ Delete", "callback_data": f"admin_offer_del_{o.id}"}
+            ])
+        buttons.append([{"text": "➕ Create New Deal", "callback_data": "admin_offer_create_start"}])
+        buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
+        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        return
+
+    elif data.startswith("admin_offer_del_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        off_id = data.replace("admin_offer_del_", "").strip()
+        off = db.query(ActiveOffer).filter((ActiveOffer.id == off_id) | (ActiveOffer.offer_key == off_id)).first()
+        if off:
+            db.delete(off)
+            db.commit()
+            await answer_callback_query(callback_query_id, "Offer deleted!")
+        else:
+            await answer_callback_query(callback_query_id, "Offer not found!")
+
+        offers = db.query(ActiveOffer).order_by(ActiveOffer.sort_order.asc()).all()
+        msg = "🎉 <b>Active Offers & Deals Management</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        buttons = []
+        for o in offers:
+            status_icon = "🟢 ACTIVE" if o.is_active else "🔴 DISABLED"
+            msg += f"• <b>{escape_html(o.title)}</b> ({status_icon})\n  └ Price: <b>₹{o.discounted_price:.2f}</b>\n\n"
+            toggle_txt = "🔴 Disable" if o.is_active else "🟢 Enable"
+            buttons.append([
+                {"text": f"{toggle_txt} ({o.offer_key[:12]})", "callback_data": f"admin_offer_toggle_{o.id}"},
+                {"text": f"❌ Delete", "callback_data": f"admin_offer_del_{o.id}"}
+            ])
+        buttons.append([{"text": "➕ Create New Deal", "callback_data": "admin_offer_create_start"}])
+        buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
+        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        return
+
+    elif data == "admin_offer_create_start":
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        session["state"] = "admin_waiting_offer_title"
+        cancel_keyboard = {
+            "keyboard": [[{"text": "❌ Cancel"}]],
+            "resize_keyboard": True,
+            "one_time_keyboard": True
+        }
+        await delete_bot_message(user.telegram_id, message_id)
+        await send_bot_message(
+            user.telegram_id,
+            "🎉 <b>Create New Deal / Offer</b>\n\n"
+            "Please enter the title for the new deal (e.g. <code>🔥 Deal 7: Super Pizza Combo</code>):",
             reply_markup=cancel_keyboard
         )
         await answer_callback_query(callback_query_id)
