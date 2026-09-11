@@ -20,7 +20,7 @@ import json
 import html
 from .utils import escape_html
 from sqlalchemy.orm import Session
-from .database import SessionLocal, User, SupportMessage, ErrorLog, SystemConfig, Product, Order, OrderItem, OrderStatusHistory, GiftCard, AuditLog, LocationPricing, Notification, UTRAttempt, SavedAddress, Coupon, CouponRedemption, WalletTransaction, WithdrawalRequest, OrderNote, RiderAssignment, Proxy, ProxyLog, DominosSession, auto_save_persistent_db_state, auto_restore_persistent_db_state
+from .database import SessionLocal, User, SupportMessage, ActiveOffer, ErrorLog, SystemConfig, Product, Order, OrderItem, OrderStatusHistory, GiftCard, AuditLog, LocationPricing, Notification, UTRAttempt, SavedAddress, Coupon, CouponRedemption, WalletTransaction, WithdrawalRequest, OrderNote, RiderAssignment, Proxy, ProxyLog, DominosSession, auto_save_persistent_db_state, auto_restore_persistent_db_state
 try:
     from .database import UserSession, DominosSession
 except ImportError:
@@ -3941,47 +3941,45 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         )
         return
 
-    elif text_lower == "🎉 active offers" or "/offers" in text_lower or "offer" in text_lower or "coupon" in text_lower:
+    elif text_lower == "🎉 active offers" or "/offers" in text_lower or "offer" in text_lower:
         bot_fee = get_bot_fee(db)
         
-        offers_text = (
-            "🎉 <b>Special Active Deals:</b>\n\n"
-            "Select one of our exclusive deals below to add items to your cart:\n\n"
-            "🔥 <b>Deal 1: Medium Cheese Burst Margherita</b>\n"
-            "• 1x Cheese Burst Margherita (Medium)\n"
-            f"• <b>Price:</b> ₹220.00 + ₹{bot_fee:.2f} Service Fee\n\n"
-            "🔥 <b>Deal 2: Paneer & Corn</b>\n"
-            "• 1x Paneer & Corn Pizza (Regular)\n"
-            f"• <b>Price:</b> ₹90.00 + ₹{bot_fee:.2f} Service Fee\n\n"
-            "🔥 <b>Deal 3: Double Cheese Burst Margherita</b>\n"
-            "• 1x Cheese Burst Margherita (Large / Double)\n"
-            f"• <b>Price:</b> ₹240.00 + ₹{bot_fee:.2f} Service Fee\n\n"
-            "🔥 <b>Deal 4: Classic Duo</b>\n"
-            "• 1x Paneer + 1x Capsicum & Paprika, or 2x Paneer / 2x Capsicum\n"
-            f"• <b>Price:</b> ₹105.00 + ₹{bot_fee:.2f} Service Fee\n\n"
-            "🔥 <b>Deal 5A: 3x Onion Pizzas</b>\n"
-            "• 3x Onion Pizzas (Regular)\n"
-            f"• <b>Price:</b> ₹100.00 + ₹{bot_fee:.2f} Service Fee\n\n"
-            "🔥 <b>Deal 5B: 4x Classic Pizzas</b>\n"
-            "• 4x Classic Pizzas (Regular)\n"
-            f"• <b>Price:</b> ₹90.00 + ₹{bot_fee:.2f} Service Fee\n\n"
-            "🔥 <b>Deal 6: 2x Chicken Sausage Pizzas</b>\n"
-            "• 2x Chicken Sausage Pizzas (Regular)\n"
-            f"• <b>Price:</b> ₹105.00 + ₹{bot_fee:.2f} Service Fee\n\n"
-            "💡 <i>Tap a deal below to load it into your cart instantly. Custom combinations available via Support!</i>"
-        )
-        offers_markup = {
-            "inline_keyboard": [
-                [{"text": "🔥 Deal 1: Cheese Burst Margherita (₹220)", "callback_data": "apply_deal_1"}],
-                [{"text": "🔥 Deal 2: Paneer & Corn (₹90)", "callback_data": "apply_deal_2"}],
-                [{"text": "🔥 Deal 3: Double Cheese Burst (₹240)", "callback_data": "apply_deal_3"}],
-                [{"text": "🔥 Deal 4: Classic Duo (₹105)", "callback_data": "apply_deal_4"}],
-                [{"text": "🔥 Deal 5A: 3x Onion Pizzas (₹100)", "callback_data": "apply_deal_5a"}],
-                [{"text": "🔥 Deal 5B: 4x Classic Pizzas (₹90)", "callback_data": "apply_deal_5b"}],
-                [{"text": "🔥 Deal 6: 2x Chicken Sausage (₹105)", "callback_data": "apply_deal_6"}],
-                [{"text": "🛒 View Cart", "callback_data": "cart_view"}]
-            ]
-        }
+        db_offers = db.query(ActiveOffer).filter(ActiveOffer.is_active == True).order_by(ActiveOffer.sort_order.asc()).all()
+        
+        if not db_offers:
+            offers_text = (
+                "🎉 <b>Special Active Deals:</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "<i>No active promotional deals available right now. Please check back soon or browse our full menu!</i>"
+            )
+            offers_markup = {
+                "inline_keyboard": [
+                    [{"text": "🍕 View Menu", "callback_data": "menu_view"}],
+                    [{"text": "🛒 View Cart", "callback_data": "cart_view"}]
+                ]
+            }
+        else:
+            lines = ["🎉 <b>Special Active Deals:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"]
+            buttons = []
+            
+            for off in db_offers:
+                badge_str = f" [{off.badge}]" if off.badge else ""
+                orig_price_str = f" <s>₹{off.original_price:.0f}</s>" if off.original_price and off.original_price > off.discounted_price else ""
+                desc_str = f"• {escape_html(off.description)}\n" if off.description else ""
+                
+                lines.append(
+                    f"<b>{escape_html(off.title)}</b>{badge_str}\n"
+                    f"{desc_str}"
+                    f"• <b>Deal Price:</b> <b>₹{off.discounted_price:.2f}</b>{orig_price_str} + ₹{bot_fee:.2f} Service Fee\n"
+                )
+                
+                btn_cb = f"apply_offer_{off.offer_key}"
+                buttons.append([{"text": off.button_text or f"🛒 Grab {off.title} @ ₹{off.discounted_price:.0f}", "callback_data": btn_cb}])
+            
+            lines.append("💡 <i>Tap a deal below to load it into your cart instantly. Custom combinations available via Support!</i>")
+            offers_text = "\n".join(lines)
+            buttons.append([{"text": "🛒 View Cart", "callback_data": "cart_view"}])
+            offers_markup = {"inline_keyboard": buttons}
         
         last_msg_id = session.get("last_bot_msg_id")
         edited = False
@@ -4604,6 +4602,41 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await display_pizza_menu(db, user, main_keyboard, page=page, category=category, edit_message_id=message_id)
         await answer_callback_query(callback_query_id)
         
+    elif data.startswith("apply_offer_") or (data.startswith("apply_deal_") and db.query(ActiveOffer).filter(ActiveOffer.offer_key == data.replace("apply_deal_", "")).first()):
+        key = data.replace("apply_offer_", "").replace("apply_deal_", "").strip()
+        offer = db.query(ActiveOffer).filter((ActiveOffer.offer_key == key) | (ActiveOffer.id == key)).first()
+        
+        if offer and offer.is_active:
+            deal_items = {}
+            if offer.items_json:
+                try:
+                    parsed_items = json.loads(offer.items_json)
+                    for item in parsed_items:
+                        name_pattern = item.get("name") or item.get("category") or ""
+                        qty = item.get("qty", 1)
+                        prod = None
+                        if name_pattern:
+                            prod = db.query(Product).filter(Product.name.like(f"%{name_pattern}%")).first()
+                        if not prod:
+                            prod = db.query(Product).first()
+                        if prod:
+                            deal_items[str(prod.id)] = deal_items.get(str(prod.id), 0) + qty
+                except Exception as e:
+                    logger.warning(f"Error parsing deal items_json: {e}")
+            
+            if not deal_items:
+                p = db.query(Product).first()
+                if p:
+                    deal_items = {str(p.id): 1}
+            
+            session["cart"] = deal_items
+            session["active_deal"] = offer.offer_key
+            session["deal_price"] = float(offer.discounted_price)
+            await answer_callback_query(callback_query_id, f"Offer '{offer.title}' applied! ₹{offer.discounted_price:.0f}")
+            cart_text, cart_markup = render_cart_message(db, user, session["cart"], session)
+            await edit_bot_message(user.telegram_id, message_id, cart_text, cart_markup)
+            return
+
     elif data == "apply_deal_1":
         # Deal 1: 1x Cheese Burst Margherita (Medium) - ₹220
         p = (db.query(Product).filter(Product.name.like("%Cheese Burst%"), Product.name.like("%Margherita%")).first()

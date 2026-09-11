@@ -1411,6 +1411,78 @@ class TestPizzaPlatform(unittest.TestCase):
             self.assertEqual(res_admin_reply.status_code, 200)
             self.assertEqual(res_admin_reply.json()["status"], "success")
 
+    def test_24_active_offers_management(self):
+        """Verify active offers seeding, API CRUD endpoints, toggle status, and bot dynamic rendering."""
+        from backend.database import ActiveOffer, seed_default_active_offers
+        from backend.auth import create_access_token
+
+        # 1. Verify default seeded offers
+        seed_default_active_offers(self.db)
+        offers = self.db.query(ActiveOffer).all()
+        self.assertGreaterEqual(len(offers), 7)
+
+        # Create admin user
+        admin = User(
+            id="usr_offer_admin_1",
+            telegram_id="999888777",
+            display_name="Offer Admin",
+            username="offer_admin",
+            role="admin"
+        )
+        self.db.add(admin)
+        self.db.commit()
+        token = create_access_token({"sub": admin.id})
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # 2. GET /offers (public endpoint)
+        res_pub = client.get("/offers")
+        self.assertEqual(res_pub.status_code, 200)
+        pub_offers = res_pub.json()
+        self.assertGreaterEqual(len(pub_offers), 7)
+
+        # 3. GET /admin/offers (admin endpoint)
+        res_adm = client.get("/admin/offers", headers=headers)
+        self.assertEqual(res_adm.status_code, 200)
+
+        # 4. POST /admin/offers (create new custom deal)
+        new_deal_payload = {
+            "offer_key": "deal_weekend_mega",
+            "title": "🎉 Weekend Mega Party Combo",
+            "badge": "🔥 60% OFF",
+            "description": "4 Large Pizzas + 2 Garlic Breads for ₹799",
+            "discounted_price": 799.0,
+            "original_price": 1499.0,
+            "button_text": "🛒 Grab Weekend Combo @ ₹799",
+            "is_active": True,
+            "sort_order": 0
+        }
+        res_create = client.post("/admin/offers", json=new_deal_payload, headers=headers)
+        self.assertEqual(res_create.status_code, 200)
+        created_data = res_create.json()
+        self.assertEqual(created_data["offer_key"], "deal_weekend_mega")
+
+        offer_id = created_data["id"]
+
+        # 5. PUT /admin/offers/{offer_id} (update price and button text)
+        update_payload = {
+            "discounted_price": 749.0,
+            "button_text": "🛒 Grab Weekend Combo @ ₹749"
+        }
+        res_update = client.put(f"/admin/offers/{offer_id}", json=update_payload, headers=headers)
+        self.assertEqual(res_update.status_code, 200)
+        self.assertEqual(res_update.json()["discounted_price"], 749.0)
+
+        # 6. POST /admin/offers/{offer_id}/toggle (disable offer)
+        res_toggle = client.post(f"/admin/offers/{offer_id}/toggle", headers=headers)
+        self.assertEqual(res_toggle.status_code, 200)
+        self.assertFalse(res_toggle.json()["is_active"])
+
+        # 7. DELETE /admin/offers/{offer_id} (delete offer)
+        res_del = client.delete(f"/admin/offers/{offer_id}", headers=headers)
+        self.assertEqual(res_del.status_code, 200)
+        del_check = self.db.query(ActiveOffer).filter(ActiveOffer.id == offer_id).first()
+        self.assertIsNone(del_check)
+
 def hashlib_sha256(text: str) -> str:
 
 

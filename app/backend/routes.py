@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from pydantic import BaseModel, Field
 
-from .database import get_db, User, UserSession, Product, Order, OrderItem, OrderStatusHistory, GiftCard, SupportMessage, AuditLog, ErrorLog, SystemConfig, LoginAttempt, SavedAddress, LocationPricing, RiderAssignment, OrderNote, Notification, Proxy, ProxyLog, DominosSession, DominosOTPRequest, QRGenerationHistory, VerifiedUTR, UTRAttempt, RobotLog, Coupon, CouponRedemption, WalletTransaction, auto_save_persistent_db_state, auto_restore_persistent_db_state
+from .database import get_db, User, UserSession, Product, Order, OrderItem, OrderStatusHistory, GiftCard, SupportMessage, ActiveOffer, AuditLog, ErrorLog, SystemConfig, LoginAttempt, SavedAddress, LocationPricing, RiderAssignment, OrderNote, Notification, Proxy, ProxyLog, DominosSession, DominosOTPRequest, QRGenerationHistory, VerifiedUTR, UTRAttempt, RobotLog, Coupon, CouponRedemption, WalletTransaction, auto_save_persistent_db_state, auto_restore_persistent_db_state
 import logging
 logger = logging.getLogger(__name__)
 from .services import dominos_service
@@ -1477,6 +1477,124 @@ async def admin_support_reply(payload: AdminSupportReplyPayload, db: Session = D
             pass
             
     return {"status": "success", "message": "Reply sent successfully"}
+
+
+# --- ACTIVE OFFERS / DEALS MANAGEMENT ENDPOINTS ---
+
+class ActiveOfferCreatePayload(BaseModel):
+    offer_key: Optional[str] = None
+    title: str
+    badge: Optional[str] = None
+    description: Optional[str] = None
+    discounted_price: float
+    original_price: Optional[float] = 0.0
+    button_text: str
+    is_active: Optional[bool] = True
+    sort_order: Optional[int] = 0
+    items_json: Optional[str] = None
+
+class ActiveOfferUpdatePayload(BaseModel):
+    title: Optional[str] = None
+    badge: Optional[str] = None
+    description: Optional[str] = None
+    discounted_price: Optional[float] = None
+    original_price: Optional[float] = None
+    button_text: Optional[str] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = None
+    items_json: Optional[str] = None
+
+@router.get("/offers")
+def get_public_active_offers(db: Session = Depends(get_db)):
+    """Public endpoint to list all currently active offers for customers."""
+    offers = db.query(ActiveOffer).filter(ActiveOffer.is_active == True).order_by(ActiveOffer.sort_order.asc()).all()
+    return offers
+
+@router.get("/admin/offers")
+def get_admin_all_offers(db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
+    """Admin view of all active and inactive offers."""
+    offers = db.query(ActiveOffer).order_by(ActiveOffer.sort_order.asc()).all()
+    return offers
+
+@router.post("/admin/offers")
+def create_active_offer(payload: ActiveOfferCreatePayload, db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
+    """Admin endpoint to create a new active offer / deal."""
+    key = (payload.offer_key or "").strip().lower()
+    if not key:
+        key = f"deal_custom_{uuid.uuid4().hex[:6]}"
+    
+    existing = db.query(ActiveOffer).filter(ActiveOffer.offer_key == key).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Offer key '{key}' already exists.")
+
+    offer = ActiveOffer(
+        offer_key=key,
+        title=payload.title,
+        badge=payload.badge,
+        description=payload.description,
+        discounted_price=payload.discounted_price,
+        original_price=payload.original_price or 0.0,
+        button_text=payload.button_text,
+        is_active=payload.is_active if payload.is_active is not None else True,
+        sort_order=payload.sort_order or 0,
+        items_json=payload.items_json
+    )
+    db.add(offer)
+    db.commit()
+    db.refresh(offer)
+    return offer
+
+@router.put("/admin/offers/{offer_id}")
+def update_active_offer(offer_id: str, payload: ActiveOfferUpdatePayload, db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
+    """Admin endpoint to update an existing offer / deal."""
+    offer = db.query(ActiveOffer).filter((ActiveOffer.id == offer_id) | (ActiveOffer.offer_key == offer_id)).first()
+    if not offer:
+        raise HTTPException(status_code=404, detail="Offer not found")
+
+    if payload.title is not None:
+        offer.title = payload.title
+    if payload.badge is not None:
+        offer.badge = payload.badge
+    if payload.description is not None:
+        offer.description = payload.description
+    if payload.discounted_price is not None:
+        offer.discounted_price = payload.discounted_price
+    if payload.original_price is not None:
+        offer.original_price = payload.original_price
+    if payload.button_text is not None:
+        offer.button_text = payload.button_text
+    if payload.is_active is not None:
+        offer.is_active = payload.is_active
+    if payload.sort_order is not None:
+        offer.sort_order = payload.sort_order
+    if payload.items_json is not None:
+        offer.items_json = payload.items_json
+
+    db.commit()
+    db.refresh(offer)
+    return offer
+
+@router.post("/admin/offers/{offer_id}/toggle")
+def toggle_active_offer(offer_id: str, db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
+    """Admin endpoint to toggle active/inactive status of an offer."""
+    offer = db.query(ActiveOffer).filter((ActiveOffer.id == offer_id) | (ActiveOffer.offer_key == offer_id)).first()
+    if not offer:
+        raise HTTPException(status_code=404, detail="Offer not found")
+
+    offer.is_active = not offer.is_active
+    db.commit()
+    return {"status": "success", "is_active": offer.is_active, "offer_id": offer.id}
+
+@router.delete("/admin/offers/{offer_id}")
+def delete_active_offer(offer_id: str, db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
+    """Admin endpoint to delete an offer."""
+    offer = db.query(ActiveOffer).filter((ActiveOffer.id == offer_id) | (ActiveOffer.offer_key == offer_id)).first()
+    if not offer:
+        raise HTTPException(status_code=404, detail="Offer not found")
+
+    db.delete(offer)
+    db.commit()
+    return {"status": "success", "message": f"Offer {offer_id} deleted successfully"}
 
 
 @router.get("/admin/stats")
