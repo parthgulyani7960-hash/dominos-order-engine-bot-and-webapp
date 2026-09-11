@@ -1494,6 +1494,55 @@ class TestPizzaPlatform(unittest.TestCase):
         del_check = self.db.query(ActiveOffer).filter(ActiveOffer.id == offer_id).first()
         self.assertIsNone(del_check)
 
+    def test_25_ui_conversions_custom_deposit_and_offer_edits(self):
+        """Tests Custom Amount input parsing, ForceReply placeholders, and Bot offer price/badge editing."""
+        from backend.bot import handle_bot_message, USER_BOT_SESSION
+        from backend.database import User, ActiveOffer
+        
+        user_tg = "777666"
+        asyncio.run(handle_bot_message(self.db, user_tg, "Test", "Custom", "testcustom", "/start"))
+        
+        # 1. Test Custom Amount flow in topup
+        asyncio.run(handle_bot_message(self.db, user_tg, "Test", "Custom", "testcustom", "/addfunds"))
+        session = USER_BOT_SESSION.get(user_tg, {})
+        self.assertEqual(session.get("state"), "waiting_for_topup_amount")
+        
+        # Send "Custom Amount" text button
+        asyncio.run(handle_bot_message(self.db, user_tg, "Test", "Custom", "testcustom", "Custom Amount"))
+        
+        # Send custom rupee value "₹450"
+        asyncio.run(handle_bot_message(self.db, user_tg, "Test", "Custom", "testcustom", "₹450"))
+        self.assertEqual(session.get("topup_amount"), 450.0)
+        
+        # 2. Test Bot Admin Offer Editing (Price & Badge)
+        os.environ["ADMIN_TELEGRAM_ID"] = user_tg
+        admin_user = self.db.query(User).filter(User.telegram_id == user_tg).first()
+        admin_user.role = "admin"
+        
+        offer = ActiveOffer(
+            offer_key="deal_bot_edit_test",
+            title="Bot Edit Test Deal",
+            badge="OLD BADGE",
+            discounted_price=100.0,
+            original_price=200.0,
+            is_active=True
+        )
+        self.db.add(offer)
+        self.db.commit()
+        self.db.refresh(offer)
+        
+        # Set state to edit price
+        session["state"] = f"admin_waiting_offer_price_edit_{offer.id}"
+        asyncio.run(handle_bot_message(self.db, user_tg, "Test", "Custom", "testcustom", "₹299"))
+        self.db.refresh(offer)
+        self.assertEqual(offer.discounted_price, 299.0)
+        
+        # Set state to edit badge
+        session["state"] = f"admin_waiting_offer_badge_edit_{offer.id}"
+        asyncio.run(handle_bot_message(self.db, user_tg, "Test", "Custom", "testcustom", "🔥 50% OFF"))
+        self.db.refresh(offer)
+        self.assertEqual(offer.badge, "🔥 50% OFF")
+
 def hashlib_sha256(text: str) -> str:
 
 

@@ -2709,6 +2709,41 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         )
         return
 
+    elif session.get("state") and session.get("state").startswith("admin_waiting_offer_price_edit_"):
+        if not is_admin:
+            await send_bot_message(user.telegram_id, "❌ Unauthorized!")
+            return
+        off_id = session["state"].replace("admin_waiting_offer_price_edit_", "").strip()
+        try:
+            new_price = float(text_clean.replace("₹", "").replace(",", "").strip())
+            if new_price <= 0: raise ValueError()
+        except ValueError:
+            await send_bot_message(user.telegram_id, "❌ Invalid price. Enter a positive number:")
+            return
+        
+        off = db.query(ActiveOffer).filter((ActiveOffer.id == off_id) | (ActiveOffer.offer_key == off_id)).first()
+        if off:
+            off.discounted_price = new_price
+            off.button_text = f"🛒 {off.title[:22]} (₹{new_price:.0f})"
+            db.commit()
+            session["state"] = None
+            await send_bot_message(user.telegram_id, f"✅ <b>Price updated to ₹{new_price:.2f}!</b>", reply_markup=main_keyboard)
+        return
+
+    elif session.get("state") and session.get("state").startswith("admin_waiting_offer_badge_edit_"):
+        if not is_admin:
+            await send_bot_message(user.telegram_id, "❌ Unauthorized!")
+            return
+        off_id = session["state"].replace("admin_waiting_offer_badge_edit_", "").strip()
+        new_badge = text.strip()
+        off = db.query(ActiveOffer).filter((ActiveOffer.id == off_id) | (ActiveOffer.offer_key == off_id)).first()
+        if off:
+            off.badge = new_badge
+            db.commit()
+            session["state"] = None
+            await send_bot_message(user.telegram_id, f"✅ <b>Badge updated to '{escape_html(new_badge)}'!</b>", reply_markup=main_keyboard)
+        return
+
     elif session.get("state") == "waiting_for_topup_amount":
         if text_clean.lower() in ("cancel", "❌ cancel", "back", "🔙 back", "main menu", "🍕 view menu", "💰 my wallet", "📍 change location", "📦 track orders", "💬 contact support"):
             session["state"] = None
@@ -2720,15 +2755,25 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             )
             return
 
+        if text_clean.lower() in ("custom amount", "custom", "custom_amount"):
+            await send_bot_message(
+                user.telegram_id,
+                "💰 <b>Enter Custom Deposit Amount (₹):</b>\n\n"
+                "Please type the amount in rupees you wish to deposit into your wallet:",
+                reply_markup={"force_reply": True, "input_field_placeholder": "Enter amount in ₹ (e.g. 500)"}
+            )
+            return
+
         try:
-            amount = float(text_clean)
+            cleaned_val = text_clean.replace("₹", "").replace(",", "").strip()
+            amount = float(cleaned_val)
             if amount <= 0:
                 raise ValueError()
         except ValueError:
             await send_bot_message(
                 user.telegram_id,
                 "❌ <b>Invalid Amount!</b>\n\nPlease enter a valid positive number for the amount (e.g. 200, 500) or send /cancel to return.",
-                reply_markup={"keyboard": [[{"text": "❌ Cancel"}]], "resize_keyboard": True, "one_time_keyboard": True}
+                reply_markup={"force_reply": True, "input_field_placeholder": "Enter amount in ₹ (e.g. 500)"}
             )
             return
             
@@ -5685,12 +5730,15 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             for off in offers:
                 status_icon = "🟢 ACTIVE" if off.is_active else "🔴 DISABLED"
                 badge_str = f" [{off.badge}]" if off.badge else ""
-                msg += f"• <b>{escape_html(off.title)}</b>{badge_str} ({status_icon})\n  └ Price: <b>₹{off.discounted_price:.2f}</b> | Key: <code>{off.offer_key}</code>\n\n"
+                orig_price_str = f" (Was ₹{off.original_price:.0f})" if off.original_price and off.original_price > off.discounted_price else ""
+                msg += f"• <b>{escape_html(off.title)}</b>{badge_str} ({status_icon})\n  └ Price: <b>₹{off.discounted_price:.2f}</b>{orig_price_str} | Key: <code>{off.offer_key}</code>\n\n"
                 
                 toggle_txt = "🔴 Disable" if off.is_active else "🟢 Enable"
                 buttons.append([
-                    {"text": f"{toggle_txt} ({off.offer_key[:12]})", "callback_data": f"admin_offer_toggle_{off.id}"},
-                    {"text": f"❌ Delete", "callback_data": f"admin_offer_del_{off.id}"}
+                    {"text": f"{toggle_txt}", "callback_data": f"admin_offer_toggle_{off.id}"},
+                    {"text": "✏️ Price", "callback_data": f"admin_offer_price_{off.id}"},
+                    {"text": "🏷️ Badge", "callback_data": f"admin_offer_badge_{off.id}"},
+                    {"text": "❌ Delete", "callback_data": f"admin_offer_del_{off.id}"}
                 ])
             
             buttons.append([{"text": "➕ Create New Deal", "callback_data": "admin_offer_create_start"}])
@@ -5718,15 +5766,48 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         buttons = []
         for o in offers:
             status_icon = "🟢 ACTIVE" if o.is_active else "🔴 DISABLED"
-            msg += f"• <b>{escape_html(o.title)}</b> ({status_icon})\n  └ Price: <b>₹{o.discounted_price:.2f}</b>\n\n"
+            badge_str = f" [{o.badge}]" if o.badge else ""
+            msg += f"• <b>{escape_html(o.title)}</b>{badge_str} ({status_icon})\n  └ Price: <b>₹{o.discounted_price:.2f}</b>\n\n"
             toggle_txt = "🔴 Disable" if o.is_active else "🟢 Enable"
             buttons.append([
-                {"text": f"{toggle_txt} ({o.offer_key[:12]})", "callback_data": f"admin_offer_toggle_{o.id}"},
-                {"text": f"❌ Delete", "callback_data": f"admin_offer_del_{o.id}"}
+                {"text": f"{toggle_txt}", "callback_data": f"admin_offer_toggle_{o.id}"},
+                {"text": "✏️ Price", "callback_data": f"admin_offer_price_{o.id}"},
+                {"text": "🏷️ Badge", "callback_data": f"admin_offer_badge_{o.id}"},
+                {"text": "❌ Delete", "callback_data": f"admin_offer_del_{o.id}"}
             ])
         buttons.append([{"text": "➕ Create New Deal", "callback_data": "admin_offer_create_start"}])
         buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        return
+
+    elif data.startswith("admin_offer_price_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        off_id = data.replace("admin_offer_price_", "").strip()
+        session["state"] = f"admin_waiting_offer_price_edit_{off_id}"
+        await delete_bot_message(user.telegram_id, message_id)
+        await send_bot_message(
+            user.telegram_id,
+            "✏️ <b>Enter New Price (₹):</b>\n\nPlease type the new discounted price in rupees:",
+            reply_markup={"force_reply": True, "input_field_placeholder": "Enter price in ₹ (e.g. 299)"}
+        )
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data.startswith("admin_offer_badge_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        off_id = data.replace("admin_offer_badge_", "").strip()
+        session["state"] = f"admin_waiting_offer_badge_edit_{off_id}"
+        await delete_bot_message(user.telegram_id, message_id)
+        await send_bot_message(
+            user.telegram_id,
+            "🏷️ <b>Enter New Badge Text:</b>\n\nPlease type the promo badge (e.g. <code>🔥 50% OFF</code> or <code>⚡ BEST VALUE</code>):",
+            reply_markup={"force_reply": True, "input_field_placeholder": "Enter badge text"}
+        )
+        await answer_callback_query(callback_query_id)
         return
 
     elif data.startswith("admin_offer_del_"):
@@ -5747,11 +5828,14 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         buttons = []
         for o in offers:
             status_icon = "🟢 ACTIVE" if o.is_active else "🔴 DISABLED"
-            msg += f"• <b>{escape_html(o.title)}</b> ({status_icon})\n  └ Price: <b>₹{o.discounted_price:.2f}</b>\n\n"
+            badge_str = f" [{o.badge}]" if o.badge else ""
+            msg += f"• <b>{escape_html(o.title)}</b>{badge_str} ({status_icon})\n  └ Price: <b>₹{o.discounted_price:.2f}</b>\n\n"
             toggle_txt = "🔴 Disable" if o.is_active else "🟢 Enable"
             buttons.append([
-                {"text": f"{toggle_txt} ({o.offer_key[:12]})", "callback_data": f"admin_offer_toggle_{o.id}"},
-                {"text": f"❌ Delete", "callback_data": f"admin_offer_del_{o.id}"}
+                {"text": f"{toggle_txt}", "callback_data": f"admin_offer_toggle_{o.id}"},
+                {"text": "✏️ Price", "callback_data": f"admin_offer_price_{o.id}"},
+                {"text": "🏷️ Badge", "callback_data": f"admin_offer_badge_{o.id}"},
+                {"text": "❌ Delete", "callback_data": f"admin_offer_del_{o.id}"}
             ])
         buttons.append([{"text": "➕ Create New Deal", "callback_data": "admin_offer_create_start"}])
         buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
