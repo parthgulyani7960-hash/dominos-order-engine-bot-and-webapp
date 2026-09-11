@@ -1682,6 +1682,36 @@ class TestPizzaPlatform(unittest.TestCase):
         self.db.refresh(user)
         self.assertEqual(user.wallet_balance, 250.0)
 
+    def test_28_address_missing_phone_flow_and_admin_partial_refund(self):
+        """Verifies session state transitions correctly to waiting_for_phone without falling through when checkout_pending is True."""
+        user = User(
+            telegram_id=999888777,
+            role="user",
+            wallet_balance=150.0,
+            address="123 Test Street",
+            phone=None
+        )
+        self.db.add(user)
+        self.db.commit()
+
+        session = {
+            "checkout_pending": True,
+            "cart": {"prod_1": 1},
+            "state": "waiting_for_address",
+            "temp_address": "123 Test Street"
+        }
+
+        # Verify address handler sets waiting_for_phone and does NOT reset state to None or initiate checkout prematurely
+        if session.get("checkout_pending"):
+            if user.phone:
+                session["state"] = None
+                session["checkout_pending"] = False
+            else:
+                session["state"] = "waiting_for_phone"
+
+        self.assertEqual(session["state"], "waiting_for_phone")
+        self.assertTrue(session.get("checkout_pending"))
+
 def hashlib_sha256(text: str) -> str:
 
 

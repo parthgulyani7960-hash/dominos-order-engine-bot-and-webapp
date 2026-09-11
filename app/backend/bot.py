@@ -2705,6 +2705,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 session["state"] = None
                 session["checkout_pending"] = False
                 await initiate_checkout(db, user, session)
+                return
             else:
                 session["state"] = "waiting_for_phone"
                 phone_keyboard = {
@@ -2719,9 +2720,11 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                     f"Format: <code>+91XXXXXXXXXX</code>",
                     reply_markup=phone_keyboard
                 )
+                return
         if session.get("cart"):
             session["state"] = None
             await initiate_checkout(db, user, session)
+            return
         else:
             session["state"] = None
             await send_bot_message(
@@ -2729,7 +2732,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 "✅ <b>Delivery address updated successfully!</b>"
             )
             await display_delivery_location_menu(db, user)
-        return
+            return
 
     elif session.get("state") and session.get("state").startswith("admin_waiting_order_screenshot_"):
         if not is_admin:
@@ -3637,78 +3640,9 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             await display_delivery_location_menu(db, user)
             return
             
-        session["state"] = "waiting_for_confirm"
-        session["force_address_entry"] = False
-        
-        cart = session.get("cart", {})
-        if not cart:
-            session["state"] = None
-            await send_bot_message(user.telegram_id, "❌ Your cart is empty! Order cancelled.", reply_markup=main_keyboard)
-            return
-            
-        address = session.get("temp_address", "Default Address")
-        phone = phone_formatted
-        
-        multiplier = 1.0
-        delivery_charge = 30.0
-
-        active_deal = session.get("active_deal")
-        if active_deal:
-            subtotal = session.get("deal_price", 0.0)
-        else:
-            subtotal = 0.0
-            for product_id_str, raw_qty in cart.items():
-                qty = parse_cart_quantity(raw_qty)
-                p = resolve_cart_item_product(db, product_id_str)
-                if p:
-                    price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
-                    subtotal += (price * qty)
-                
-        # Fetch bot service fee
-        bot_fee = get_bot_fee(db)
-        total_payable = subtotal + bot_fee
-        
-        # Build item list for the confirmation message
-        item_lines = []
-        for product_id_str, raw_qty in list(cart.items()):
-            qty = parse_cart_quantity(raw_qty)
-            p = resolve_cart_item_product(db, product_id_str)
-            if p:
-                price = float(round(p.discounted_price if p.discounted_price is not None else p.original_price))
-                if active_deal:
-                    item_lines.append(f"  • <b>{p.name}</b> x{qty}")
-                else:
-                    item_lines.append(f"  • <b>{p.name}</b> x{qty} — ₹{price * qty:.0f}")
-        items_text = "\n".join(item_lines) if item_lines else "  • Pizza Items"
-
-        confirm_text = (
-            f"📋 <b>Please Confirm Your Order</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🛒 <b>Items:</b>\n{items_text}\n\n"
-            f"🏡 <b>Delivery Address:</b> {address}\n"
-            f"📱 <b>Phone Number:</b> {phone}\n\n"
-            f"💰 <b>Price Breakdown:</b>\n"
-            f"  Pizza Total:     ₹{subtotal:.2f}\n"
-            f"  Bot Service Fee: +₹{bot_fee:.2f}\n"
-            f"  ─────────────────\n"
-            f"  <b>Total Payable: ₹{total_payable:.2f}</b>\n\n"
-            f"💡 <i>Wallet Balance: ₹{user.wallet_balance:.2f}</i>\n\n"
-            f"Are you sure you want to place this order?"
-        )
-        
-        confirm_markup = {
-            "inline_keyboard": [
-                [
-                    {"text": "✅ Yes, Confirm & Place", "callback_data": "order_confirm_place"},
-                    {"text": "❌ Cancel Order", "callback_data": "order_cancel_place"}
-                ]
-            ]
-        }
-        await send_bot_message(
-            user.telegram_id,
-            confirm_text,
-            reply_markup=confirm_markup
-        )
+        session["checkout_pending"] = False
+        session["state"] = None
+        await initiate_checkout(db, user, session)
         return
 
     # 2. Setup keyboards & permissions
@@ -6965,12 +6899,13 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         db.add(h)
         
         refunded = False
-        if order.payment_method == "wallet":
-            order.user.wallet_balance += order.total_payable
+        refund_amt = getattr(order, "wallet_applied", 0.0) or (order.total_payable if order.payment_method == "wallet" else 0.0)
+        if refund_amt > 0:
+            order.user.wallet_balance += refund_amt
             tx = WalletTransaction(
                 user_id=order.user.id,
                 type="refund",
-                amount=order.total_payable,
+                amount=refund_amt,
                 description=f"Order Rejected/Cancelled Refund: {order.id}"
             )
             db.add(tx)
