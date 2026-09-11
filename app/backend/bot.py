@@ -1733,6 +1733,16 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
     if text and text.strip().lower() in ("❌ cancel", "cancel", "🔙 back", "back", "🏠 main menu"):
         prev_state = session.get("state")
         session["state"] = None
+        user.bot_state = None
+        try:
+            db.commit()
+        except Exception:
+            pass
+
+        if prev_state == "waiting_for_support_message":
+            session["support_relation"] = None
+            await send_bot_message(user.telegram_id, "❌ <b>Support message cancelled.</b>", reply_markup=main_keyboard)
+            return
         
         # Admin cancels an input while in Order Editor wizards
         if prev_state and any(prev_state.startswith(x) for x in ["admin_waiting_edit_ref_", "admin_waiting_store_", "admin_waiting_rider_name_", "admin_waiting_rider_phone_", "admin_waiting_order_screenshot_", "admin_waiting_ref_"]):
