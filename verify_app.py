@@ -1520,6 +1520,9 @@ class TestPizzaPlatform(unittest.TestCase):
         admin_user = self.db.query(User).filter(User.telegram_id == user_tg).first()
         admin_user.role = "admin"
         
+        self.db.query(ActiveOffer).filter(ActiveOffer.offer_key == "deal_bot_edit_test").delete()
+        self.db.commit()
+        
         offer = ActiveOffer(
             offer_key="deal_bot_edit_test",
             title="Bot Edit Test Deal",
@@ -1553,6 +1556,9 @@ class TestPizzaPlatform(unittest.TestCase):
         
         user_tg = "666555"
         asyncio.run(handle_bot_message(self.db, user_tg, "Test", "Deals", "testdeals", "/start"))
+        
+        self.db.query(ActiveOffer).filter(ActiveOffer.offer_key == "deal_rich_combo").delete()
+        self.db.commit()
         
         # Add rich ActiveOffer with item breakdown JSON
         import json
