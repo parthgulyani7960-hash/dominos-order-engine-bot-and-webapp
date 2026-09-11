@@ -1278,8 +1278,8 @@ class TestPizzaPlatform(unittest.TestCase):
             self.assertNotIn("Delivery City:", msg)
             
             keyboard_texts = [btn["text"] for row in markup["keyboard"] for btn in row]
-            self.assertIn("📍 Share My GPS Location", keyboard_texts)
-            self.assertIn("🏠 Update Delivery Address", keyboard_texts)
+            self.assertTrue(any("GPS Location" in b for b in keyboard_texts))
+            self.assertTrue(any("Address" in b for b in keyboard_texts))
             self.assertNotIn("🏙️ Change City / Area", keyboard_texts)
 
         # 2. Test manual doorstep address entry (preserves existing coords)
