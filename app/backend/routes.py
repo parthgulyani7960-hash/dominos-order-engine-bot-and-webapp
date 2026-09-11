@@ -22,7 +22,7 @@ from .auth import (
     verify_token, hash_password, verify_password, ACCESS_TOKEN_EXPIRE_MINUTES
 )
 from .bot import send_bot_message, send_bot_photo, get_order_progress_bar, reverse_geocode
-from .utils import encrypt_data, decrypt_data, parse_gift_card_file, api_rate_limiter, strict_rate_limiter, generate_upi_qr_details
+from .utils import encrypt_data, decrypt_data, parse_gift_card_file, api_rate_limiter, strict_rate_limiter, generate_upi_qr_details, escape_html
 
 router = APIRouter()
 UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads"))
@@ -1354,12 +1354,12 @@ async def send_support_message(payload: SupportMessageSend, db: Session = Depend
         target_user_id = current_user.id
         sender_type = "user"
         
-    target_user = db.query(User).filter(User.id == target_user_id).first()
+    target_user = db.query(User).filter((User.id == target_user_id) | (User.telegram_id == str(target_user_id))).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="Recipient user not found")
         
     msg = SupportMessage(
-        user_id=target_user_id,
+        user_id=target_user.id,
         sender_type=sender_type,
         message=payload.message
     )
@@ -1372,12 +1372,36 @@ async def send_support_message(payload: SupportMessageSend, db: Session = Depend
             target_user.telegram_id,
             f"💬 <b>Support Agent Reply:</b>\n{payload.message}"
         )
+    else:
+        # If user message from web mini-app, forward ticket notification to admin Telegram
+        admin_tg_id = os.getenv("ADMIN_TELEGRAM_ID", "7958236048")
+        admin_ticket_text = (
+            f"💬 <b>Web Support Ticket from {escape_html(current_user.display_name)}</b>\n"
+            f"• User ID: <code>{current_user.id}</code>\n"
+            f"• Telegram ID: <code>{current_user.telegram_id}</code>\n"
+            f"• Phone Number: <code>{current_user.phone or '—'}</code>\n\n"
+            f"✉️ <b>Message:</b>\n"
+            f"<blockquote>{escape_html(payload.message)}</blockquote>"
+        )
+        admin_ticket_markup = {
+            "inline_keyboard": [
+                [{"text": "💬 Custom Reply", "callback_data": f"admin_reply_support_{current_user.telegram_id}"}],
+                [
+                    {"text": "📋 Order Placed", "callback_data": f"admin_tmpl_placed_{current_user.telegram_id}"},
+                    {"text": "💸 Refund Done", "callback_data": f"admin_tmpl_refund_{current_user.telegram_id}"}
+                ]
+            ]
+        }
+        try:
+            await send_bot_message(admin_tg_id, admin_ticket_text, reply_markup=admin_ticket_markup)
+        except Exception as err:
+            logger.warning(f"Could not send web support ticket notification to admin: {err}")
         
     # Trigger SSE update
     if sse_broadcast_callback:
         await sse_broadcast_callback({
             "type": "support_message",
-            "user_id": target_user_id,
+            "user_id": target_user.id,
             "sender_type": sender_type,
             "message": payload.message,
             "created_at": msg.created_at.isoformat()
@@ -1420,12 +1444,12 @@ async def admin_support_reply(payload: AdminSupportReplyPayload, db: Session = D
     from .database import SupportMessage
     from .bot import send_bot_message
     
-    target_user = db.query(User).filter(User.id == payload.user_id).first()
+    target_user = db.query(User).filter((User.id == payload.user_id) | (User.telegram_id == str(payload.user_id))).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
         
     msg = SupportMessage(
-        user_id=payload.user_id,
+        user_id=target_user.id,
         sender_type="admin",
         message=payload.message
     )
@@ -1444,7 +1468,7 @@ async def admin_support_reply(payload: AdminSupportReplyPayload, db: Session = D
         try:
             await sse_broadcast_callback({
                 "type": "support_message",
-                "user_id": payload.user_id,
+                "user_id": target_user.id,
                 "sender_type": "admin",
                 "message": payload.message,
                 "created_at": msg.created_at.isoformat()

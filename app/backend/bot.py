@@ -2254,39 +2254,94 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
     state = session.get("state") or ""
     if state.startswith("admin_replying_to_"):
         target_tg_id = state.replace("admin_replying_to_", "").strip()
-        reply_text = text.strip() if text else ""
-        if not reply_text:
-            await send_bot_message(user.telegram_id, "⚠️ Please send a valid message text.")
+        text_clean_lower = text_clean.lower()
+        if text_clean_lower in ("cancel", "❌ cancel", "/cancel"):
+            session["state"] = None
+            await send_bot_message(user.telegram_id, "❌ <b>Admin reply cancelled.</b>")
             return
-        target_user = db.query(DbUser).filter(DbUser.telegram_id == target_tg_id).first()
+
+        reply_text = text.strip() if text else ""
+        file_id = None
+        attachment_type = None
+        if photo:
+            largest = max(photo, key=lambda p: p.get("file_size", 0))
+            file_id = largest["file_id"]
+            attachment_type = "photo"
+            if not reply_text:
+                reply_text = "[Photo Attachment]"
+        elif document:
+            file_id = document.get("file_id")
+            attachment_type = "document"
+            if not reply_text:
+                reply_text = f"[Document: {document.get('file_name', 'Attachment')}]"
+
+        if not reply_text and not file_id:
+            await send_bot_message(user.telegram_id, "⚠️ Please send a valid message text or attachment.")
+            return
+
+        target_user = db.query(DbUser).filter(
+            (DbUser.telegram_id == target_tg_id) | (DbUser.id == target_tg_id)
+        ).first()
+
         if target_user:
             try:
                 sup = SupportMessage(
                     user_id=target_user.id,
                     sender_type="admin",
-                    message=reply_text
+                    message=reply_text,
+                    attachment_file_id=file_id,
+                    attachment_type=attachment_type
                 )
                 db.add(sup)
                 db.commit()
+                if sse_broadcast_callback:
+                    try:
+                        await sse_broadcast_callback({
+                            "type": "support_message",
+                            "user_id": target_user.id,
+                            "sender_type": "admin",
+                            "message": reply_text,
+                            "created_at": sup.created_at.isoformat()
+                        })
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.warning(f"Could not save support message reply: {e}")
-                
-            cust_msg = (
-                f"💬 <b>Support Agent Reply:</b>\n"
-                f"{reply_text}"
-            )
-            await send_bot_message(target_tg_id, cust_msg)
-            await send_bot_message(
-                user.telegram_id,
-                f"✅ <b>Reply sent to customer</b> (TG ID: <code>{target_tg_id}</code>)."
-            )
+
+            cust_msg = f"💬 <b>Support Agent Reply:</b>\n{reply_text}"
+            if file_id:
+                sent_ok = await send_bot_photo(target_user.telegram_id, file_id, caption=cust_msg)
+            else:
+                sent_ok = await send_bot_message(target_user.telegram_id, cust_msg)
+
             session["state"] = None
+            if sent_ok:
+                await send_bot_message(
+                    user.telegram_id,
+                    f"✅ <b>Reply sent to customer</b> (TG ID: <code>{target_user.telegram_id}</code>)."
+                )
+            else:
+                await send_bot_message(
+                    user.telegram_id,
+                    f"⚠️ <b>Saved to database, but failed to deliver via TG bot</b> (User TG ID: <code>{target_user.telegram_id}</code>)."
+                )
         else:
-            await send_bot_message(user.telegram_id, f"❌ Target user (TG ID: {target_tg_id}) not found.")
             session["state"] = None
+            await send_bot_message(user.telegram_id, f"❌ Target user (TG ID: {target_tg_id}) not found.")
         return
 
     if session.get("state") == "waiting_for_support_message":
+        text_clean_lower = text_clean.lower()
+        if text_clean_lower in ("cancel", "❌ cancel", "back", "🔙 back", "/cancel", "/start", "main menu", "🍕 view menu", "💰 my wallet", "📍 change location", "📦 track orders", "💬 contact support"):
+            session["state"] = None
+            session["support_relation"] = None
+            await send_bot_message(
+                user.telegram_id,
+                "❌ <b>Support message cancelled.</b>",
+                reply_markup=main_keyboard
+            )
+            return
+
         msg_text = text.strip() if text else ""
         if not photo and not document and len(msg_text) < 10:
             await send_bot_message(
@@ -2332,21 +2387,23 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                     pass
         except Exception as db_err:
             logger.warning(f"Could not save support message: {db_err}")
+        
         session["state"] = None
         await send_bot_message(
             user.telegram_id,
             "✅ <b>Support message sent!</b>\n\n"
             "Our team has received your message and will reply directly in this chat shortly.\n\n"
-            "<i>Your message:</i>\n" + f"<blockquote>{msg_text[:300]}</blockquote>",
+            "<i>Your message:</i>\n" + f"<blockquote>{escape_html(msg_text[:300])}</blockquote>",
             reply_markup=main_keyboard
         )
         
         # Forward to admin
         admin_tg_id = os.getenv("ADMIN_TELEGRAM_ID", "7958236048")
         relation = session.get("support_relation", "General Query")
+        session["support_relation"] = None
         
         # Build relation detail for admin
-        relation_detail = f"<b>{relation}</b>"
+        relation_detail = f"<b>{escape_html(relation)}</b>"
         if relation.startswith("Order: "):
             oid = relation.replace("Order: ", "").strip()
             bg_order = db.query(Order).filter(Order.id == oid).first()
@@ -2354,14 +2411,14 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 relation_detail += f" (Status: {bg_order.status}, Paid: ₹{bg_order.total_payable:.2f}, Phone: {bg_order.phone})"
                 
         admin_ticket_text = (
-            f"💬 <b>Support Ticket from {user.display_name}</b>\n"
+            f"💬 <b>Support Ticket from {escape_html(user.display_name)}</b>\n"
             f"• User ID: <code>{user.id}</code>\n"
             f"• Telegram ID: <code>{user.telegram_id}</code>\n"
             f"• Username: @{user.username or '—'}\n"
             f"• Phone Number: <code>{user.phone or '—'}</code>\n"
             f"• Relates to: {relation_detail}\n\n"
             f"✉️ <b>Message:</b>\n"
-            f"<blockquote>{msg_text}</blockquote>"
+            f"<blockquote>{escape_html(msg_text)}</blockquote>"
         )
         admin_ticket_markup = {
             "inline_keyboard": [
@@ -4273,6 +4330,33 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             "<i>Your message:</i>\n" + f"<blockquote>{escape_html(msg_text[:300])}</blockquote>",
             reply_markup=main_keyboard
         )
+
+        # Forward fallback ticket to admin
+        admin_tg_id = os.getenv("ADMIN_TELEGRAM_ID", "7958236048")
+        admin_ticket_text = (
+            f"💬 <b>Support Ticket from {escape_html(user.display_name)}</b>\n"
+            f"• User ID: <code>{user.id}</code>\n"
+            f"• Telegram ID: <code>{user.telegram_id}</code>\n"
+            f"• Username: @{user.username or '—'}\n"
+            f"• Phone Number: <code>{user.phone or '—'}</code>\n"
+            f"• Relates to: <b>General Query (Unprompted)</b>\n\n"
+            f"✉️ <b>Message:</b>\n"
+            f"<blockquote>{escape_html(msg_text)}</blockquote>"
+        )
+        admin_ticket_markup = {
+            "inline_keyboard": [
+                [{"text": "💬 Custom Reply", "callback_data": f"admin_reply_support_{user.telegram_id}"}],
+                [
+                    {"text": "📋 Order Placed", "callback_data": f"admin_tmpl_placed_{user.telegram_id}"},
+                    {"text": "💸 Refund Done", "callback_data": f"admin_tmpl_refund_{user.telegram_id}"}
+                ],
+                [
+                    {"text": "❌ UTR Invalid", "callback_data": f"admin_tmpl_utr_{user.telegram_id}"},
+                    {"text": "🕒 Delay Alert", "callback_data": f"admin_tmpl_delay_{user.telegram_id}"}
+                ]
+            ]
+        }
+        await send_bot_message(admin_tg_id, admin_ticket_text, reply_markup=admin_ticket_markup)
         return
 
 def parse_cart_quantity(raw_qty) -> int:

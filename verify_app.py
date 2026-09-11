@@ -1319,6 +1319,97 @@ class TestPizzaPlatform(unittest.TestCase):
             # Must NOT be overwritten with literal string "GPS Location"
             self.assertEqual(saved_addr.full_address, "Flat 402, Sunshine Apartments, MG Road, Andheri West")
 
+    def test_23_support_message_fixes(self):
+        """Verify support state cancellation, HTML escaping in ticket forward, and support API endpoints."""
+        from unittest.mock import patch, AsyncMock
+        from backend.bot import handle_bot_message
+        
+        # Create test user
+        test_user = User(
+            id="usr_supp_test_123",
+            telegram_id="888111222",
+            display_name="Support Test User <Tag>",
+            username="supp_user",
+            role="customer"
+        )
+        self.db.add(test_user)
+        self.db.commit()
+
+        # 1. Test state cancellation for waiting_for_support_message
+        session = {"state": "waiting_for_support_message"}
+        with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
+             patch("app.backend.bot.bot_sessions", {"888111222": session}):
+            asyncio.run(handle_bot_message(
+                self.db, "888111222", "Support Test User <Tag>", "supp_user",
+                text="❌ Cancel"
+            ))
+            # State must be reset to None
+            self.assertIsNone(session.get("state"))
+            mock_send.assert_called_once()
+            self.assertIn("cancelled", mock_send.call_args[0][1].lower())
+
+        # 2. Test sending support ticket with HTML characters
+        session = {"state": "waiting_for_support_message"}
+        with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
+             patch("app.backend.bot.bot_sessions", {"888111222": session}):
+            asyncio.run(handle_bot_message(
+                self.db, "888111222", "Support Test User <Tag>", "supp_user",
+                text="Hello <admin>, my order #101 has an issue!"
+            ))
+            # Check DB record created
+            sup = self.db.query(SupportMessage).filter(SupportMessage.user_id == test_user.id).first()
+            self.assertIsNotNone(sup)
+            self.assertEqual(sup.message, "Hello <admin>, my order #101 has an issue!")
+            # State cleared
+            self.assertIsNone(session.get("state"))
+
+        # 3. Test admin reply cancellation
+        admin_session = {"state": "admin_replying_to_888111222"}
+        with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
+             patch("app.backend.bot.bot_sessions", {"123456789": admin_session}):
+            asyncio.run(handle_bot_message(
+                self.db, "123456789", "Admin User", "admin",
+                text="Cancel"
+            ))
+            self.assertIsNone(admin_session.get("state"))
+
+        # 4. Test Web API endpoints for support
+        token = create_access_token({"sub": test_user.id})
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        # Send message via user
+        res = client.post("/support/messages", json={"message": "Need help via Web App!"}, headers=headers)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["message"], "Need help via Web App!")
+
+        # Fetch support messages
+        res_get = client.get("/support/messages", headers=headers)
+        self.assertEqual(res_get.status_code, 200)
+        msgs = res_get.json()
+        self.assertGreaterEqual(len(msgs), 2)
+
+        # Admin reply via API
+        admin_user = User(
+            id="usr_admin_supp_test",
+            telegram_id="123456789",
+            display_name="Admin",
+            username="admin",
+            role="admin"
+        )
+        self.db.add(admin_user)
+        self.db.commit()
+        admin_token = create_access_token({"sub": admin_user.id})
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+        with patch("app.backend.routes.send_bot_message", new_callable=AsyncMock):
+            res_admin_reply = client.post("/admin/support-reply", json={
+                "user_id": test_user.id,
+                "message": "We have checked your issue and resolved it!"
+            }, headers=admin_headers)
+            self.assertEqual(res_admin_reply.status_code, 200)
+            self.assertEqual(res_admin_reply.json()["status"], "success")
+
 def hashlib_sha256(text: str) -> str:
 
 
