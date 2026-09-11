@@ -1338,7 +1338,7 @@ class TestPizzaPlatform(unittest.TestCase):
         # 1. Test state cancellation for waiting_for_support_message
         session = {"state": "waiting_for_support_message"}
         with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
-             patch("app.backend.bot.bot_sessions", {"888111222": session}):
+             patch("app.backend.bot.USER_BOT_SESSION", {"888111222": session}):
             asyncio.run(handle_bot_message(
                 self.db, "888111222", "Support Test User <Tag>", "supp_user",
                 text="❌ Cancel"
@@ -1351,7 +1351,7 @@ class TestPizzaPlatform(unittest.TestCase):
         # 2. Test sending support ticket with HTML characters
         session = {"state": "waiting_for_support_message"}
         with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
-             patch("app.backend.bot.bot_sessions", {"888111222": session}):
+             patch("app.backend.bot.USER_BOT_SESSION", {"888111222": session}):
             asyncio.run(handle_bot_message(
                 self.db, "888111222", "Support Test User <Tag>", "supp_user",
                 text="Hello <admin>, my order #101 has an issue!"
@@ -1366,7 +1366,7 @@ class TestPizzaPlatform(unittest.TestCase):
         # 3. Test admin reply cancellation
         admin_session = {"state": "admin_replying_to_888111222"}
         with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
-             patch("app.backend.bot.bot_sessions", {"123456789": admin_session}):
+             patch("app.backend.bot.USER_BOT_SESSION", {"123456789": admin_session}):
             asyncio.run(handle_bot_message(
                 self.db, "123456789", "Admin User", "admin",
                 text="Cancel"
