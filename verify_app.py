@@ -1526,6 +1526,7 @@ class TestPizzaPlatform(unittest.TestCase):
             badge="OLD BADGE",
             discounted_price=100.0,
             original_price=200.0,
+            button_text="🛒 Bot Edit Test Deal (₹100)",
             is_active=True
         )
         self.db.add(offer)
