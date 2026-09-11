@@ -1321,6 +1321,7 @@ class TestPizzaPlatform(unittest.TestCase):
 
     def test_23_support_message_fixes(self):
         """Verify support state cancellation, HTML escaping in ticket forward, and support API endpoints."""
+        import asyncio
         from unittest.mock import patch, AsyncMock
         from backend.bot import handle_bot_message
         
@@ -1340,7 +1341,7 @@ class TestPizzaPlatform(unittest.TestCase):
         with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
              patch("app.backend.bot.USER_BOT_SESSION", {"888111222": session}):
             asyncio.run(handle_bot_message(
-                self.db, "888111222", "Support Test User <Tag>", "supp_user",
+                self.db, "888111222", "Support Test", "User", "supp_user",
                 text="❌ Cancel"
             ))
             # State must be reset to None
@@ -1353,7 +1354,7 @@ class TestPizzaPlatform(unittest.TestCase):
         with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
              patch("app.backend.bot.USER_BOT_SESSION", {"888111222": session}):
             asyncio.run(handle_bot_message(
-                self.db, "888111222", "Support Test User <Tag>", "supp_user",
+                self.db, "888111222", "Support Test", "User", "supp_user",
                 text="Hello <admin>, my order #101 has an issue!"
             ))
             # Check DB record created
@@ -1368,7 +1369,7 @@ class TestPizzaPlatform(unittest.TestCase):
         with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
              patch("app.backend.bot.USER_BOT_SESSION", {"123456789": admin_session}):
             asyncio.run(handle_bot_message(
-                self.db, "123456789", "Admin User", "admin",
+                self.db, "123456789", "Admin", "User", "admin",
                 text="Cancel"
             ))
             self.assertIsNone(admin_session.get("state"))
