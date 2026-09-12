@@ -1816,26 +1816,33 @@ async def update_order_status(
     
     order.status = new_status
     
-    # Process Refund/Cancellation: credit wallet and log transaction
+    # Process Refund/Cancellation: credit wallet only for amounts debited from wallet
     if new_status in ("Refunded", "Cancelled") and old_status not in ("Refunded", "Cancelled"):
         customer = db.query(User).filter(User.id == order.user_id).first()
-        if customer and order.payment_method in ("wallet", "upi"):
-            customer.wallet_balance += order.total_payable
-            # Write WalletTransaction ledger entry
-            refund_tx = WalletTransaction(
-                user_id=customer.id,
-                type="refund",
-                amount=order.total_payable,
-                description=f"Refund for {new_status.lower()} order #{order.id[:8]}"
-            )
-            db.add(refund_tx)
-            # Audit log
-            await log_admin_action(
-                db, admin.id, admin.username,
-                "REFUND_APPROVED" if new_status == "Refunded" else "ORDER_CANCELLED_REFUND",
-                {"order_id": order.id, "amount": order.total_payable, "user": customer.display_name},
-                request
-            )
+        if customer:
+            wallet_refund_amt = 0.0
+            if order.payment_method == "wallet":
+                wallet_refund_amt = order.total_payable
+            elif order.payment_method in ("partial_wallet_upi", "partial_wallet"):
+                wallet_refund_amt = getattr(order, "wallet_applied", 0.0) or 0.0
+            # NOTE: pure "upi" orders are NOT auto-refunded — manual UPI refunds need admin confirmation
+            if wallet_refund_amt > 0:
+                customer.wallet_balance += wallet_refund_amt
+                # Write WalletTransaction ledger entry
+                refund_tx = WalletTransaction(
+                    user_id=customer.id,
+                    type="refund",
+                    amount=wallet_refund_amt,
+                    description=f"Wallet refund for {new_status.lower()} order #{order.id[:8]}"
+                )
+                db.add(refund_tx)
+                # Audit log
+                await log_admin_action(
+                    db, admin.id, admin.username,
+                    "REFUND_APPROVED" if new_status == "Refunded" else "ORDER_CANCELLED_REFUND",
+                    {"order_id": order.id, "amount": wallet_refund_amt, "user": customer.display_name},
+                    request
+                )
             
     if payload.estimated_delivery_minutes is not None:
         order.estimated_delivery = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) + datetime.timedelta(minutes=payload.estimated_delivery_minutes)
@@ -3035,14 +3042,21 @@ async def cancel_order(
     order.cancellation_reason = payload.reason or "Cancelled by customer"
     order.updated_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
-    # Refund wallet balance if wallet or upi payment, and log the transaction
-    if order.payment_method in ("wallet", "upi"):
-        order.user.wallet_balance += order.total_payable
+    # Refund wallet balance only for amounts that were debited from the wallet
+    wallet_refund = 0.0
+    if order.payment_method == "wallet":
+        wallet_refund = order.total_payable
+    elif order.payment_method in ("partial_wallet_upi", "partial_wallet"):
+        # Only refund the wallet portion — UPI portion requires admin action
+        wallet_refund = getattr(order, "wallet_applied", 0.0) or 0.0
+    # NOTE: pure "upi" orders are NOT auto-refunded here — UPI payments need manual admin verification
+    if wallet_refund > 0:
+        order.user.wallet_balance += wallet_refund
         refund_tx = WalletTransaction(
             user_id=user.id,
             type="refund",
-            amount=order.total_payable,
-            description=f"Refund for cancelled order #{order.id[:8]}"
+            amount=wallet_refund,
+            description=f"Wallet refund for cancelled order #{order.id[:8]}"
         )
         db.add(refund_tx)
 
@@ -4951,8 +4965,8 @@ async def verify_payment(order_id: str, payload: PaymentVerifyRequest, request: 
     _now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     order_created = order.created_at.replace(tzinfo=None) if order.created_at and order.created_at.tzinfo else order.created_at
     order_age_seconds = (_now - order_created).total_seconds() if order_created else 0
-    if order_age_seconds > 1200:
-        raise HTTPException(status_code=400, detail="This payment verification window has expired (20 minutes limit). Please place a new order.")
+    if order_age_seconds > 600:
+        raise HTTPException(status_code=400, detail="This payment verification window has expired (10 minutes limit). Please place a new order.")
         
     # Rate limit: 3 failed attempts per order ID
     failed_attempts = db.query(UTRAttempt).filter(

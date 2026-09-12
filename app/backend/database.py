@@ -274,13 +274,16 @@ class Order(TimestampMixin, Base):
 class OrderItem(Base):
     __tablename__ = "order_items"
 
-    id         = Column(String(36), primary_key=True, default=_uuid_default)
-    order_id   = Column(String(36), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True)
-    product_id = Column(String(36), ForeignKey("products.id"), nullable=False)
-    quantity   = Column(Integer, nullable=False)
-    price      = Column(Float, nullable=False)  # Price at time of purchase
-    crust      = Column(String, nullable=True)
-    size       = Column(String, nullable=True)
+    id           = Column(String(36), primary_key=True, default=_uuid_default)
+    order_id     = Column(String(36), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_id   = Column(String(36), ForeignKey("products.id"), nullable=True)
+    item_key     = Column(String, nullable=True)
+    item_name    = Column(String, nullable=True)
+    item_details = Column(Text, nullable=True)
+    quantity     = Column(Integer, nullable=False)
+    price        = Column(Float, nullable=False)  # Price at time of purchase
+    crust        = Column(String, nullable=True)
+    size         = Column(String, nullable=True)
 
     order   = relationship("Order", back_populates="items")
     product = relationship("Product")
@@ -803,19 +806,38 @@ def auto_save_persistent_db_state(db=None) -> bool:
 
         orders_data = []
         for o in orders:
+            o_items = []
+            for item in (o.items or []):
+                o_items.append({
+                    "id": item.id,
+                    "product_id": item.product_id,
+                    "item_key": getattr(item, "item_key", None),
+                    "item_name": getattr(item, "item_name", None) or (item.product.name if item.product else None),
+                    "item_details": getattr(item, "item_details", None),
+                    "quantity": item.quantity,
+                    "price": float(item.price or 0.0),
+                    "crust": item.crust,
+                    "size": item.size
+                })
+
             orders_data.append({
                 "id": o.id,
                 "user_id": o.user_id,
+                "original_total": float(o.original_total or 0.0),
                 "total_payable": float(o.total_payable or 0.0),
                 "status": o.status,
                 "payment_method": o.payment_method,
                 "address": o.address,
                 "phone": o.phone,
+                "latitude": o.latitude,
+                "longitude": o.longitude,
+                "delivery_instructions": o.delivery_instructions,
                 "dominos_reference": getattr(o, "dominos_reference", None),
                 "wallet_applied": float(getattr(o, "wallet_applied", 0.0) or 0.0),
                 "upi_paid": float(getattr(o, "upi_paid", 0.0) or 0.0),
                 "transaction_id": o.transaction_id,
                 "created_at": o.created_at.isoformat() if o.created_at else None,
+                "items": o_items
             })
 
         tx_data = []
@@ -858,7 +880,7 @@ def auto_save_persistent_db_state(db=None) -> bool:
             })
 
         data = {
-            "version": 1.2,
+            "version": 1.3,
             "saved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "users": users_data,
             "saved_addresses": addresses_data,
@@ -886,7 +908,7 @@ def auto_save_persistent_db_state(db=None) -> bool:
 
 
 def auto_restore_persistent_db_state(db) -> bool:
-    """Restores user accounts, wallet balances, saved addresses, orders, transactions, and coupons if the database file was reset or replaced on deployment."""
+    """Restores user accounts, wallet balances, saved addresses, orders, transaction items, and coupons if the database file was reset or replaced on deployment."""
     # Try restoring from Firebase Realtime DB first
     data = download_snapshot_from_firebase()
     if not data:
@@ -985,12 +1007,33 @@ def auto_restore_persistent_db_state(db) -> bool:
                     payment_method=o_data.get("payment_method", "wallet"),
                     address=o_data.get("address"),
                     phone=o_data.get("phone"),
+                    latitude=o_data.get("latitude"),
+                    longitude=o_data.get("longitude"),
+                    delivery_instructions=o_data.get("delivery_instructions"),
                     dominos_reference=o_data.get("dominos_reference") or o_data.get("dominos_order_id"),
                     wallet_applied=float(o_data.get("wallet_applied", 0.0)),
                     upi_paid=float(o_data.get("upi_paid", 0.0)),
                     transaction_id=o_data.get("transaction_id", f"TXN-{uuid.uuid4().hex[:10].upper()}")
                 )
                 db.add(o)
+                db.flush()
+                
+                # Restore order items for this order if present
+                for item_rec in o_data.get("items", []):
+                    oi = OrderItem(
+                        id=item_rec.get("id"),
+                        order_id=o.id,
+                        product_id=item_rec.get("product_id"),
+                        item_key=item_rec.get("item_key"),
+                        item_name=item_rec.get("item_name"),
+                        item_details=item_rec.get("item_details"),
+                        quantity=int(item_rec.get("quantity", 1)),
+                        price=float(item_rec.get("price", 0.0)),
+                        crust=item_rec.get("crust"),
+                        size=item_rec.get("size")
+                    )
+                    db.add(oi)
+
                 restored_orders += 1
 
         for tx_rec in data.get("wallet_transactions", []):
@@ -1114,6 +1157,15 @@ def init_db() -> None:
         if "attachment_type" not in support_cols:
             conn.execute(text("ALTER TABLE support_messages ADD COLUMN attachment_type VARCHAR"))
 
+        # OrderItem columns
+        item_cols = [c["name"] for c in insp.get_columns("order_items")]
+        if "item_key" not in item_cols:
+            conn.execute(text("ALTER TABLE order_items ADD COLUMN item_key VARCHAR"))
+        if "item_name" not in item_cols:
+            conn.execute(text("ALTER TABLE order_items ADD COLUMN item_name VARCHAR"))
+        if "item_details" not in item_cols:
+            conn.execute(text("ALTER TABLE order_items ADD COLUMN item_details TEXT"))
+
         # Create withdrawal_requests table if not exists
         if not insp.has_table("withdrawal_requests"):
             conn.execute(text("""
@@ -1130,6 +1182,17 @@ def init_db() -> None:
                     FOREIGN KEY(user_id) REFERENCES users(id)
                 )
             """))
+
+    # Auto-restore persistent state and seed default active offers on database initialization
+    db = SessionLocal()
+    try:
+        auto_restore_persistent_db_state(db)
+        seed_default_active_offers(db)
+    except Exception as e:
+        logger.error(f"[INIT DB PERSISTENCE RECOVERY ERROR] {e}")
+    finally:
+        db.close()
+
 
 def seed_default_active_offers(db: Session):
     """Seeds default ActiveOffer records if the active_offers table is empty."""
@@ -1233,14 +1296,6 @@ def seed_default_active_offers(db: Session):
         db.commit()
     except Exception as e:
         db.rollback()
-
-    # Auto-restore persistent state if new database instance
-    db = SessionLocal()
-    try:
-        auto_restore_persistent_db_state(db)
-        seed_default_active_offers(db)
-    finally:
-        db.close()
 
 
 # ---------------------------------------------------------------------------

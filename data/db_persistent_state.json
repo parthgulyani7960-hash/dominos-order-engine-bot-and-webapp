@@ -1,14 +1,82 @@
 {
-  "version": 1.2,
-  "saved_at": "2026-09-11T15:58:21.323413+00:00",
+  "version": 1.3,
+  "saved_at": "2026-09-12T08:03:48.754141+00:00",
   "users": [
     {
-      "id": "c14e5136-3bd5-4957-8b2b-b209b5849adc",
+      "id": "c0990018-90ec-4194-8d49-42203da38f37",
+      "telegram_id": "7958236048",
+      "username": "Rajkumar_7960",
+      "display_name": "Yadav sharma",
+      "phone": null,
+      "city": "Kharar Tahsil",
+      "address": "GPS Location",
+      "latitude": 30.771097,
+      "longitude": 76.790202,
+      "wallet_balance": 150.0,
+      "is_admin": true,
+      "bot_state": "admin_waiting_promo_code",
+      "bot_cart": "{\"5dfbb8a6-f2b2-4f57-90d6-dc1300edad62\": 1, \"7bc1d6c8-43fd-4f17-a948-fda60ff3ef3b\": 1}",
+      "telegram_verified": false,
+      "created_at": "2026-08-27T05:23:11.976637"
+    },
+    {
+      "id": "da395d07-88f4-450b-842b-80ca76e638d3",
+      "telegram_id": "6389109455",
+      "username": "dogesh7960",
+      "display_name": "DaYa kumar",
+      "phone": "+917888422429",
+      "city": "Kharar Tahsil",
+      "address": "1403",
+      "latitude": 30.771033,
+      "longitude": 76.790096,
+      "wallet_balance": 99914.0,
+      "is_admin": false,
+      "bot_state": "waiting_for_promo_code",
+      "bot_cart": "{}",
+      "telegram_verified": false,
+      "created_at": "2026-08-27T05:44:21.381907"
+    },
+    {
+      "id": "d7c064d9-7c5c-4a6e-bb8f-af9b4e2d0410",
+      "telegram_id": "8675298302",
+      "username": "",
+      "display_name": "Vivek",
+      "phone": "+913214567894",
+      "city": "Kharar Tahsil",
+      "address": "Hiii",
+      "latitude": 30.771007,
+      "longitude": 76.790178,
+      "wallet_balance": 270.0,
+      "is_admin": true,
+      "bot_state": null,
+      "bot_cart": "{\"53993c21-dad7-432f-b2b7-d65282a4d815\": 1}",
+      "telegram_verified": false,
+      "created_at": "2026-09-01T06:26:55.280548"
+    },
+    {
+      "id": "0d730255-f3d7-4df6-bf57-de3ed6f3f045",
+      "telegram_id": "5452351644",
+      "username": "AM_I_STILL_ALIVE",
+      "display_name": "\ud835\udc7a\ud835\udc82\ud835\udc94\ud835\udc96\ud835\udc8c\ud835\udc86 \ud835\udc7c\ud835\udc84\ud835\udc89\ud835\udc8a\ud835\udc89\ud835\udc82",
+      "phone": null,
+      "city": "India",
+      "address": null,
+      "latitude": null,
+      "longitude": null,
+      "wallet_balance": 1.0,
+      "is_admin": false,
+      "bot_state": null,
+      "bot_cart": "{}",
+      "telegram_verified": false,
+      "created_at": "2026-09-01T07:30:29.745541"
+    },
+    {
+      "id": "d0da7442-5850-4e86-a5b0-9b1c17f7009c",
       "telegram_id": "777666",
       "username": "admin",
       "display_name": "Super Admin",
       "phone": null,
-      "city": null,
+      "city": "India",
       "address": null,
       "latitude": null,
       "longitude": null,
@@ -17,10 +85,10 @@
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-11T15:58:18.905438"
+      "created_at": "2026-09-12T08:03:48.732184"
     },
     {
-      "id": "d68fea38-2d23-4c16-841f-52966fc000a1",
+      "id": "ddfc10d4-818a-4977-8864-a1c2dd12b389",
       "telegram_id": "777888",
       "username": "stackeruser",
       "display_name": "Stacker User",
@@ -34,10 +102,40 @@
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-11T15:58:18.911060"
+      "created_at": "2026-09-12T08:03:48.732187"
     }
   ],
   "saved_addresses": [
+    {
+      "id": "146432fc-a542-406b-9c24-0d328eb90fbe",
+      "user_id": "c0990018-90ec-4194-8d49-42203da38f37",
+      "label": "Home",
+      "full_address": "GPS Location",
+      "latitude": 30.771097,
+      "longitude": 76.790202,
+      "city": "Kharar Tahsil",
+      "is_default": true
+    },
+    {
+      "id": "131cfed2-4ed7-4d66-ba94-8f627e2bb914",
+      "user_id": "da395d07-88f4-450b-842b-80ca76e638d3",
+      "label": "Home",
+      "full_address": "1403",
+      "latitude": 30.771033,
+      "longitude": 76.790096,
+      "city": "Kharar Tahsil",
+      "is_default": true
+    },
+    {
+      "id": "3f721717-05f4-4d29-b7b3-01657e76e9b0",
+      "user_id": "d7c064d9-7c5c-4a6e-bb8f-af9b4e2d0410",
+      "label": "Home",
+      "full_address": "Hiii",
+      "latitude": 30.771007,
+      "longitude": 76.790178,
+      "city": "Kharar Tahsil",
+      "is_default": true
+    },
     {
       "id": "3f6d500c-0449-4472-b0b3-e0191249513b",
       "user_id": "67b37f77-50fd-4265-9f38-62555626e087",
@@ -427,11 +525,466 @@
       "longitude": 72.8777,
       "city": "Mumbai",
       "is_default": true
+    },
+    {
+      "id": "2ad59349-e19f-4e08-8fdf-0df2e2dfce4b",
+      "user_id": "2f25a02e-8bb4-4b6d-b9b3-096d27b8fa5f",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "e4115577-7ddd-4f67-90e7-e387d418d017",
+      "user_id": "2c7a0bc7-ef95-4776-9b19-56e104e9ea27",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "03a11061-1dae-4127-be9a-cd28d04d591a",
+      "user_id": "0c830b8a-e1ea-4246-81e2-940a0c3c1853",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "0dfb99f9-c932-4adb-ae44-4de0f1596c6e",
+      "user_id": "4db5199b-0017-42a0-9c89-f71acd8d6c48",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "fd667fd3-0059-4dc2-9953-3135f90facf1",
+      "user_id": "4eb34e20-b1cc-484e-a5de-006882ed2db8",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "dc447640-4927-4339-8e39-552fe6f0def5",
+      "user_id": "61a062db-986d-4e85-8a79-609465988339",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "1c8d8225-c70f-4f66-92bf-1adf21577103",
+      "user_id": "6f2008df-a123-4ac1-b540-cc908df8b5a2",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "be348303-8ae2-4d17-8878-4e46a5217f60",
+      "user_id": "f2cd6745-ab3b-4a40-a5ed-ca4c0d1fc0f8",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "1d4aa866-5b91-432f-b2c2-973042e9bc36",
+      "user_id": "56eda0cb-209b-4de0-aacc-ccffb127655b",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "749600ac-fdb3-4098-aea3-3d23738395b7",
+      "user_id": "ddfc10d4-818a-4977-8864-a1c2dd12b389",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
     }
   ],
-  "orders": [],
-  "wallet_transactions": [],
-  "coupons": [],
+  "orders": [
+    {
+      "id": "BOT-F7E066B7",
+      "user_id": "da395d07-88f4-450b-842b-80ca76e638d3",
+      "original_total": 408.0,
+      "total_payable": 418.0,
+      "status": "Completed",
+      "payment_method": "wallet",
+      "address": "1403",
+      "phone": "+917888422429",
+      "latitude": 30.771033,
+      "longitude": 76.790096,
+      "delivery_instructions": null,
+      "dominos_reference": "hi",
+      "wallet_applied": 0.0,
+      "upi_paid": 0.0,
+      "transaction_id": "TXN-44C144ADFAE2",
+      "created_at": "2026-08-27T05:46:34.596160",
+      "items": [
+        {
+          "id": "7efa6eae-b14b-4a4a-ae89-abe76e2c225f",
+          "product_id": "7bc1d6c8-43fd-4f17-a948-fda60ff3ef3b",
+          "item_key": null,
+          "item_name": "Margherita",
+          "item_details": null,
+          "quantity": 1,
+          "price": 239.0,
+          "crust": null,
+          "size": null
+        },
+        {
+          "id": "49612f4c-7e37-49dd-838c-4dc85e08c051",
+          "product_id": "f6f5eacd-8b35-40e9-a630-af21120f9906",
+          "item_key": null,
+          "item_name": "7Up 500ml",
+          "item_details": null,
+          "quantity": 1,
+          "price": 60.0,
+          "crust": null,
+          "size": null
+        },
+        {
+          "id": "345b1ad0-244e-48af-a759-6a40561c9c97",
+          "product_id": "0ae4a47f-11c4-49ea-a902-6e6dbf22967c",
+          "item_key": null,
+          "item_name": "Garlic Breadsticks",
+          "item_details": null,
+          "quantity": 1,
+          "price": 109.0,
+          "crust": null,
+          "size": null
+        }
+      ]
+    },
+    {
+      "id": "BOT-9656FFFC",
+      "user_id": "da395d07-88f4-450b-842b-80ca76e638d3",
+      "original_total": 109.0,
+      "total_payable": 119.0,
+      "status": "Delivered",
+      "payment_method": "wallet",
+      "address": "1403",
+      "phone": "+917888422429",
+      "latitude": 30.771033,
+      "longitude": 76.790096,
+      "delivery_instructions": "15",
+      "dominos_reference": "15215",
+      "wallet_applied": 0.0,
+      "upi_paid": 0.0,
+      "transaction_id": "TXN-2C59F5427CC8",
+      "created_at": "2026-08-28T07:54:35.497439",
+      "items": [
+        {
+          "id": "e18ae00b-4b1d-4c2a-95b9-8405d7b85f10",
+          "product_id": "0ae4a47f-11c4-49ea-a902-6e6dbf22967c",
+          "item_key": null,
+          "item_name": "Garlic Breadsticks",
+          "item_details": null,
+          "quantity": 1,
+          "price": 109.0,
+          "crust": null,
+          "size": null
+        }
+      ]
+    },
+    {
+      "id": "TOPUP-930038",
+      "user_id": "c0990018-90ec-4194-8d49-42203da38f37",
+      "original_total": 100.0,
+      "total_payable": 100.0,
+      "status": "Pending Payment",
+      "payment_method": "upi",
+      "address": null,
+      "phone": null,
+      "latitude": null,
+      "longitude": null,
+      "delivery_instructions": null,
+      "dominos_reference": null,
+      "wallet_applied": 0.0,
+      "upi_paid": 0.0,
+      "transaction_id": "TEMP-978A224B",
+      "created_at": "2026-09-01T05:39:38.798727",
+      "items": []
+    },
+    {
+      "id": "BOT-5632AE75",
+      "user_id": "da395d07-88f4-450b-842b-80ca76e638d3",
+      "original_total": 777.0,
+      "total_payable": 787.0,
+      "status": "Preparing",
+      "payment_method": "wallet",
+      "address": "1403",
+      "phone": "+917888422429",
+      "latitude": 30.771033,
+      "longitude": 76.790096,
+      "delivery_instructions": null,
+      "dominos_reference": null,
+      "wallet_applied": 0.0,
+      "upi_paid": 0.0,
+      "transaction_id": "TXN-2DA98CD3A77F",
+      "created_at": "2026-09-01T05:44:58.812242",
+      "items": [
+        {
+          "id": "29691b88-6df8-48a5-81f6-987b12a98bfa",
+          "product_id": "7bc1d6c8-43fd-4f17-a948-fda60ff3ef3b",
+          "item_key": null,
+          "item_name": "Margherita",
+          "item_details": null,
+          "quantity": 3,
+          "price": 239.0,
+          "crust": null,
+          "size": null
+        },
+        {
+          "id": "0c6ac803-74bc-4e17-8316-2230706992ec",
+          "product_id": "53993c21-dad7-432f-b2b7-d65282a4d815",
+          "item_key": null,
+          "item_name": "Pepsi 500ml",
+          "item_details": null,
+          "quantity": 1,
+          "price": 60.0,
+          "crust": null,
+          "size": null
+        }
+      ]
+    },
+    {
+      "id": "TOPUP-446317",
+      "user_id": "d7c064d9-7c5c-4a6e-bb8f-af9b4e2d0410",
+      "original_total": 70.0,
+      "total_payable": 70.0,
+      "status": "Completed",
+      "payment_method": "upi",
+      "address": null,
+      "phone": null,
+      "latitude": null,
+      "longitude": null,
+      "delivery_instructions": null,
+      "dominos_reference": null,
+      "wallet_applied": 0.0,
+      "upi_paid": 0.0,
+      "transaction_id": "TEMP-2E29A510",
+      "created_at": "2026-09-01T06:27:34.689463",
+      "items": []
+    },
+    {
+      "id": "TOPUP-237333",
+      "user_id": "d7c064d9-7c5c-4a6e-bb8f-af9b4e2d0410",
+      "original_total": 50.0,
+      "total_payable": 50.0,
+      "status": "Pending Payment",
+      "payment_method": "upi",
+      "address": null,
+      "phone": null,
+      "latitude": null,
+      "longitude": null,
+      "delivery_instructions": null,
+      "dominos_reference": null,
+      "wallet_applied": 0.0,
+      "upi_paid": 0.0,
+      "transaction_id": "TEMP-F8AFE0B5",
+      "created_at": "2026-09-01T06:40:52.911204",
+      "items": []
+    },
+    {
+      "id": "TOPUP-810754",
+      "user_id": "d7c064d9-7c5c-4a6e-bb8f-af9b4e2d0410",
+      "original_total": 200.0,
+      "total_payable": 200.0,
+      "status": "Cancelled",
+      "payment_method": "upi",
+      "address": null,
+      "phone": null,
+      "latitude": null,
+      "longitude": null,
+      "delivery_instructions": null,
+      "dominos_reference": null,
+      "wallet_applied": 0.0,
+      "upi_paid": 0.0,
+      "transaction_id": "TEMP-CE77C4CA",
+      "created_at": "2026-09-01T06:41:13.321653",
+      "items": []
+    },
+    {
+      "id": "TOPUP-412649",
+      "user_id": "0d730255-f3d7-4df6-bf57-de3ed6f3f045",
+      "original_total": 1.0,
+      "total_payable": 1.0,
+      "status": "Completed",
+      "payment_method": "upi",
+      "address": null,
+      "phone": null,
+      "latitude": null,
+      "longitude": null,
+      "delivery_instructions": null,
+      "dominos_reference": null,
+      "wallet_applied": 0.0,
+      "upi_paid": 0.0,
+      "transaction_id": "TEMP-ACA450AB",
+      "created_at": "2026-09-01T07:39:28.593080",
+      "items": []
+    },
+    {
+      "id": "TOPUP-980013",
+      "user_id": "c0990018-90ec-4194-8d49-42203da38f37",
+      "original_total": 100.0,
+      "total_payable": 100.0,
+      "status": "Completed",
+      "payment_method": "upi",
+      "address": null,
+      "phone": null,
+      "latitude": null,
+      "longitude": null,
+      "delivery_instructions": null,
+      "dominos_reference": null,
+      "wallet_applied": 0.0,
+      "upi_paid": 0.0,
+      "transaction_id": "TEMP-49FACE97",
+      "created_at": "2026-09-01T07:42:50.571095",
+      "items": []
+    }
+  ],
+  "wallet_transactions": [
+    {
+      "id": "5872397b-9b59-4538-bb27-706e2da9bede",
+      "user_id": "da395d07-88f4-450b-842b-80ca76e638d3",
+      "type": "deposit",
+      "amount": 1000.0,
+      "description": "Redeemed promo code: 1000",
+      "created_at": "2026-08-27T05:45:39.400543"
+    },
+    {
+      "id": "8315d47a-c91a-4666-8d4d-f9d8d2e0b355",
+      "user_id": "da395d07-88f4-450b-842b-80ca76e638d3",
+      "type": "payment",
+      "amount": -418.0,
+      "description": "Paid for order: BOT-F7E066B7",
+      "created_at": "2026-08-27T05:46:34.599659"
+    },
+    {
+      "id": "3dd0fdeb-eac2-4c88-ad71-e2302729f842",
+      "user_id": "da395d07-88f4-450b-842b-80ca76e638d3",
+      "type": "deposit",
+      "amount": 100000.0,
+      "description": "Redeemed promo code: 1215",
+      "created_at": "2026-08-28T07:54:17.586999"
+    },
+    {
+      "id": "5c4dbbf3-d4f0-4e3c-a962-e36e8dbe4504",
+      "user_id": "da395d07-88f4-450b-842b-80ca76e638d3",
+      "type": "payment",
+      "amount": -119.0,
+      "description": "Paid for order: BOT-9656FFFC",
+      "created_at": "2026-08-28T07:54:35.495694"
+    },
+    {
+      "id": "4c6ef78e-6f93-4df1-b04b-ccd7d442acbd",
+      "user_id": "da395d07-88f4-450b-842b-80ca76e638d3",
+      "type": "refund",
+      "amount": 119.0,
+      "description": "User-cancelled order refund: BOT-9656FFFC",
+      "created_at": "2026-08-28T07:56:05.976336"
+    },
+    {
+      "id": "311505fa-e7eb-4e24-a756-daf7f7076b6b",
+      "user_id": "da395d07-88f4-450b-842b-80ca76e638d3",
+      "type": "refund",
+      "amount": 119.0,
+      "description": "User-cancelled order refund: BOT-9656FFFC",
+      "created_at": "2026-08-28T07:56:34.960507"
+    },
+    {
+      "id": "8923d015-a7e2-406f-a7cb-5dd97ed99a63",
+      "user_id": "c0990018-90ec-4194-8d49-42203da38f37",
+      "type": "refund",
+      "amount": 50.0,
+      "description": "Admin Adjustment (+50.00)",
+      "created_at": "2026-08-28T08:23:06.805149"
+    },
+    {
+      "id": "c1a48b4b-1f33-4ea7-807f-0163eb6eb445",
+      "user_id": "da395d07-88f4-450b-842b-80ca76e638d3",
+      "type": "payment",
+      "amount": -787.0,
+      "description": "Paid for order: BOT-5632AE75",
+      "created_at": "2026-09-01T05:44:58.809890"
+    },
+    {
+      "id": "799bc45d-39fd-491a-b9d3-e683f4f51b4b",
+      "user_id": "d7c064d9-7c5c-4a6e-bb8f-af9b4e2d0410",
+      "type": "deposit",
+      "amount": 70.0,
+      "description": "Deposit via UTR: TEMP-2E29A510",
+      "created_at": "2026-09-01T06:31:37.712052"
+    },
+    {
+      "id": "4b5a6267-6469-45c4-89a3-04d69132faf2",
+      "user_id": "d7c064d9-7c5c-4a6e-bb8f-af9b4e2d0410",
+      "type": "deposit",
+      "amount": 200.0,
+      "description": "Deposit via UTR: TEMP-CE77C4CA",
+      "created_at": "2026-09-01T06:42:08.701041"
+    },
+    {
+      "id": "74ea3c66-1fd7-453b-9d49-01a13a9de15e",
+      "user_id": "0d730255-f3d7-4df6-bf57-de3ed6f3f045",
+      "type": "deposit",
+      "amount": 1.0,
+      "description": "Deposit via UTR: TEMP-ACA450AB",
+      "created_at": "2026-09-01T07:40:31.558600"
+    },
+    {
+      "id": "fc564494-b197-47f0-87fe-4934bc97759a",
+      "user_id": "c0990018-90ec-4194-8d49-42203da38f37",
+      "type": "deposit",
+      "amount": 100.0,
+      "description": "Deposit via UTR: TEMP-49FACE97",
+      "created_at": "2026-09-01T07:42:58.443226"
+    }
+  ],
+  "coupons": [
+    {
+      "id": "16003bf4-b0a8-4783-aa84-78b6ebde74af",
+      "code": "1000",
+      "value": 1000.0,
+      "usage_limit": 1,
+      "redeemed_count": 1,
+      "is_active": true
+    },
+    {
+      "id": "d9772eeb-5032-4841-8457-46a183e2500a",
+      "code": "1215",
+      "value": 100000.0,
+      "usage_limit": 1,
+      "redeemed_count": 1,
+      "is_active": true
+    }
+  ],
   "offers": [
     {
       "id": "1d72ca26-6a8f-4680-a95d-b46b146fa9df",
@@ -525,7 +1078,7 @@
       "items_json": "[{\"name\": \"Chicken Sausage\", \"qty\": 2}]"
     },
     {
-      "id": "158cc355-8aeb-4cff-b2a3-d9841ac83db4",
+      "id": "6a8268d7-19b8-4917-af96-0287431a6232",
       "offer_key": "deal_bot_edit_test",
       "title": "Bot Edit Test Deal",
       "badge": "\ud83d\udd25 50% OFF",
@@ -538,7 +1091,7 @@
       "items_json": null
     },
     {
-      "id": "934763b7-2946-42ae-bf82-5c9f0e44eaf5",
+      "id": "fdf11b00-a3f5-4ef2-938d-313c61d2e1a5",
       "offer_key": "deal_rich_combo",
       "title": "Party Fiesta Combo",
       "badge": "\u26a1 50% OFF",

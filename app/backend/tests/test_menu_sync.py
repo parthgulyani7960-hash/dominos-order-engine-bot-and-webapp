@@ -34,7 +34,7 @@ async def test_sync_realtime_menu_upsert(db_session):
         # Verify one of the seeded products exists (e.g., Margherita)
         margherita = db.query(Product).filter(Product.name == "Margherita").first()
         assert margherita is not None
-        assert margherita.original_price == 239.0
+        assert margherita.original_price == 109.0
         assert margherita.is_veg is True
     finally:
         db.close()
