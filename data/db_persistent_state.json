@@ -1,6 +1,6 @@
 {
   "version": 1.3,
-  "saved_at": "2026-09-12T08:18:53.660378+00:00",
+  "saved_at": "2026-09-12T08:57:13.424319+00:00",
   "users": [
     {
       "id": "c0990018-90ec-4194-8d49-42203da38f37",
@@ -12,7 +12,7 @@
       "address": null,
       "latitude": 30.771097,
       "longitude": 76.790202,
-      "wallet_balance": 0.0,
+      "wallet_balance": 250.0,
       "is_admin": true,
       "bot_state": null,
       "bot_cart": null,
@@ -106,8 +106,37 @@
     }
   ],
   "saved_addresses": [],
-  "orders": [],
-  "wallet_transactions": [],
+  "orders": [
+    {
+      "id": "TOPUP-999888",
+      "user_id": "c0990018-90ec-4194-8d49-42203da38f37",
+      "original_total": 250.0,
+      "total_payable": 250.0,
+      "status": "Completed",
+      "payment_method": "upi",
+      "address": null,
+      "phone": null,
+      "latitude": null,
+      "longitude": null,
+      "delivery_instructions": null,
+      "dominos_reference": null,
+      "wallet_applied": 0.0,
+      "upi_paid": 0.0,
+      "transaction_id": "TXN-TOPUP-999888",
+      "created_at": "2026-09-12T08:57:05.789733",
+      "items": []
+    }
+  ],
+  "wallet_transactions": [
+    {
+      "id": "c4a4eac9-30a2-469a-920d-0ea5f40b9bb4",
+      "user_id": "c0990018-90ec-4194-8d49-42203da38f37",
+      "type": "deposit",
+      "amount": 250.0,
+      "description": "UPI Deposit Approved (Ref: TOPUP-999888)",
+      "created_at": "2026-09-12T08:57:13.418664"
+    }
+  ],
   "coupons": [
     {
       "id": "16003bf4-b0a8-4783-aa84-78b6ebde74af",
@@ -126,5 +155,19 @@
       "is_active": true
     }
   ],
-  "offers": []
+  "offers": [
+    {
+      "id": "4b2b7a77-55f2-4a00-a822-0abf6a1dd3a5",
+      "offer_key": "deal1",
+      "title": "2 Regular Pizzas @ \u20b999 each",
+      "badge": "SAVE 30%",
+      "description": null,
+      "discounted_price": 198.0,
+      "original_price": 0.0,
+      "button_text": "\ud83d\uded2 Add Deal",
+      "is_active": true,
+      "sort_order": 0,
+      "items_json": "[{\"name\": \"Margherita\", \"size\": \"Regular\", \"qty\": 2}]"
+    }
+  ]
 }
