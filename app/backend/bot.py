@@ -188,8 +188,10 @@ async def delete_bot_message(telegram_id: str, message_id: int) -> bool:
         return False
 
 
-async def answer_callback_query(callback_query_id: str, text: str = None, show_alert: bool = False, url: str = None) -> bool:
-    """Dismisses the loading spinner icon on the Telegram client button. If show_alert=True, shows a popup alert instead of a toast."""
+async def answer_callback_query(callback_query_id: str, text: str = None, show_alert: bool = False, alert: bool = False, url: str = None) -> bool:
+    """Dismisses the loading spinner icon on the Telegram client button. If show_alert=True or alert=True, shows a popup alert instead of a toast."""
+    if alert:
+        show_alert = True
     if not BOT_TOKEN or BOT_TOKEN == "MOCK_TOKEN":
         return True
     tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery"
@@ -630,6 +632,19 @@ async def send_bot_photo(telegram_id: str, photo_url: str, caption: str = None, 
         if resp.status_code == 200:
             return True
         else:
+            # Check if Telegram returned document file type error
+            if "Document as Photo" in resp.text:
+                try:
+                    doc_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
+                    doc_payload = {"chat_id": telegram_id, "document": file_id if is_telegram_file else target_path}
+                    if caption: doc_payload["caption"] = caption; doc_payload["parse_mode"] = "HTML"
+                    if reply_markup: doc_payload["reply_markup"] = reply_markup
+                    doc_resp = await _http_client.post(doc_url, json=doc_payload, timeout=15.0)
+                    if doc_resp.status_code == 200:
+                        return True
+                except Exception:
+                    pass
+
             db = SessionLocal()
             err = ErrorLog(
                 type="notification",
@@ -4809,74 +4824,77 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
 
     else:
         msg_text = text.strip() if text else ""
-        # Filter out short noise / greetings / single-word typos from creating support tickets
-        ignored_words = ("hi", "hello", "hey", "test", "ok", "menu", "pizza", "help", "start", "admin", "back", "cancel")
-        if len(msg_text) < 8 or msg_text.lower() in ignored_words:
+        current_state = session.get("state")
+        
+        if current_state == "waiting_for_support_message":
+            # Explicit support mode: save as support message & send ticket to admin
             session["state"] = None
-            help_reply = (
-                f"❓ <b>I have not recognized your message.</b>\n\n"
-                f"Kindly click one of the menu buttons below to navigate, view pizzas, or manage your order.\n\n"
-                f"<i>If you need assistance or want a custom order, tap <b>💬 Contact Support</b> in the menu or type /support.</i>"
+            try:
+                sup = SupportMessage(
+                    user_id=user.id,
+                    sender_type="user",
+                    message=msg_text
+                )
+                db.add(sup)
+                db.commit()
+                if sse_broadcast_callback:
+                    try:
+                        await sse_broadcast_callback({
+                            "type": "support_message",
+                            "user_id": user.id,
+                            "message": msg_text,
+                            "display_name": user.display_name
+                        })
+                    except Exception:
+                        pass
+            except Exception as db_err:
+                logger.warning(f"Could not save support message: {db_err}")
+
+            await send_bot_message(
+                user.telegram_id,
+                "✅ <b>Support message sent!</b>\n\n"
+                "Our support team has received your message and will reply directly in this chat shortly.\n\n"
+                "<i>Your message:</i>\n" + f"<blockquote>{escape_html(msg_text[:300])}</blockquote>",
+                reply_markup=main_keyboard
             )
-            await send_bot_message(user.telegram_id, help_reply, reply_markup=main_keyboard)
+
+            # Forward support ticket to admin
+            admin_tg_id = os.getenv("ADMIN_TELEGRAM_ID", "7958236048")
+            support_rel = session.get("support_relation", "General Query")
+            admin_ticket_text = (
+                f"💬 <b>Support Ticket from {escape_html(user.display_name)}</b>\n"
+                f"• User ID: <code>{user.id}</code>\n"
+                f"• Telegram ID: <code>{user.telegram_id}</code>\n"
+                f"• Username: @{user.username or '—'}\n"
+                f"• Phone Number: <code>{user.phone or '—'}</code>\n"
+                f"• Relates to: <b>{escape_html(support_rel)}</b>\n\n"
+                f"✉️ <b>Message:</b>\n"
+                f"<blockquote>{escape_html(msg_text)}</blockquote>"
+            )
+            admin_ticket_markup = {
+                "inline_keyboard": [
+                    [{"text": "💬 Custom Reply", "callback_data": f"admin_reply_support_{user.telegram_id}"}],
+                    [
+                        {"text": "📋 Order Placed", "callback_data": f"admin_tmpl_placed_{user.telegram_id}"},
+                        {"text": "💸 Refund Done", "callback_data": f"admin_tmpl_refund_{user.telegram_id}"}
+                    ],
+                    [
+                        {"text": "❌ UTR Invalid", "callback_data": f"admin_tmpl_utr_{user.telegram_id}"},
+                        {"text": "🕒 Delay Alert", "callback_data": f"admin_tmpl_delay_{user.telegram_id}"}
+                    ]
+                ]
+            }
+            await send_bot_message(admin_tg_id, admin_ticket_text, reply_markup=admin_ticket_markup)
             return
 
-        # Descriptive text: save as support message
-        try:
-            sup = SupportMessage(
-                user_id=user.id,
-                sender_type="user",
-                message=msg_text
-            )
-            db.add(sup)
-            db.commit()
-            if sse_broadcast_callback:
-                try:
-                    await sse_broadcast_callback({
-                        "type": "support_message",
-                        "user_id": user.id,
-                        "message": msg_text,
-                        "display_name": user.display_name
-                    })
-                except Exception:
-                    pass
-        except Exception as db_err:
-            logger.warning(f"Could not save fallback support message: {db_err}")
-
-        await send_bot_message(
-            user.telegram_id,
-            "✅ <b>Support message sent!</b>\n\n"
-            "Our team has received your message and will reply directly in this chat shortly.\n\n"
-            "<i>Your message:</i>\n" + f"<blockquote>{escape_html(msg_text[:300])}</blockquote>",
-            reply_markup=main_keyboard
+        # General unhandled message: clear state & show unrecognized command guidance
+        session["state"] = None
+        help_reply = (
+            f"❓ <b>I have not recognized your message.</b>\n\n"
+            f"Kindly click one of the menu buttons below to navigate, view pizzas, or manage your order.\n\n"
+            f"<i>If you need assistance or want a custom order, tap <b>💬 Contact Support</b> in the menu or type /support.</i>"
         )
-
-        # Forward fallback ticket to admin
-        admin_tg_id = os.getenv("ADMIN_TELEGRAM_ID", "7958236048")
-        admin_ticket_text = (
-            f"💬 <b>Support Ticket from {escape_html(user.display_name)}</b>\n"
-            f"• User ID: <code>{user.id}</code>\n"
-            f"• Telegram ID: <code>{user.telegram_id}</code>\n"
-            f"• Username: @{user.username or '—'}\n"
-            f"• Phone Number: <code>{user.phone or '—'}</code>\n"
-            f"• Relates to: <b>General Query (Unprompted)</b>\n\n"
-            f"✉️ <b>Message:</b>\n"
-            f"<blockquote>{escape_html(msg_text)}</blockquote>"
-        )
-        admin_ticket_markup = {
-            "inline_keyboard": [
-                [{"text": "💬 Custom Reply", "callback_data": f"admin_reply_support_{user.telegram_id}"}],
-                [
-                    {"text": "📋 Order Placed", "callback_data": f"admin_tmpl_placed_{user.telegram_id}"},
-                    {"text": "💸 Refund Done", "callback_data": f"admin_tmpl_refund_{user.telegram_id}"}
-                ],
-                [
-                    {"text": "❌ UTR Invalid", "callback_data": f"admin_tmpl_utr_{user.telegram_id}"},
-                    {"text": "🕒 Delay Alert", "callback_data": f"admin_tmpl_delay_{user.telegram_id}"}
-                ]
-            ]
-        }
-        await send_bot_message(admin_tg_id, admin_ticket_text, reply_markup=admin_ticket_markup)
+        await send_bot_message(user.telegram_id, help_reply, reply_markup=main_keyboard)
         return
 
 def parse_cart_quantity(raw_qty) -> int:
@@ -5015,8 +5033,15 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         
     elif data.startswith("menu_page_"):
         parts = data.split("_")
-        page = int(parts[2])
-        category = parts[3]
+        if len(parts) >= 3 and parts[2] == "noop":
+            await answer_callback_query(callback_query_id, "📄 Page Indicator")
+            return
+        try:
+            page = int(parts[2])
+        except (IndexError, ValueError):
+            await answer_callback_query(callback_query_id, "📄 Page Indicator")
+            return
+        category = parts[3] if len(parts) > 3 else "All"
         await display_pizza_menu(db, user, main_keyboard, page=page, category=category, edit_message_id=message_id)
         await answer_callback_query(callback_query_id)
         
@@ -6203,17 +6228,22 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         pdf.cell(0, 8, f"Current Total Wallet Holdings: INR {total_wallets:.2f}", ln=True)
         pdf.ln(10)
         
+        def _clean_str(val) -> str:
+            if val is None:
+                return "N/A"
+            return str(val).encode('latin-1', 'replace').decode('latin-1')
+
         for u in users[:50]:
             pdf.add_page()
             
             pdf.set_font("Helvetica", "B", 13)
             pdf.set_text_color(24, 38, 86)
-            pdf.cell(0, 8, f"User Profile: {(u.display_name or 'N/A').encode('latin-1', 'replace').decode('latin-1')}", ln=True)
+            pdf.cell(0, 8, _clean_str(f"User Profile: {u.display_name or 'N/A'}"), ln=True)
             pdf.set_font("Helvetica", "", 10)
             pdf.set_text_color(50, 50, 50)
-            pdf.cell(0, 6, f"Telegram ID: {u.telegram_id}  |  Username: @{u.username or 'N/A'}", ln=True)
-            pdf.cell(0, 6, f"Phone: {u.phone or 'N/A'}  |  Role: {u.role.upper()}", ln=True)
-            pdf.cell(0, 6, f"Current Wallet Balance: INR {u.wallet_balance:.2f}  |  Status: {'Blocked' if u.is_blocked else 'Active'}", ln=True)
+            pdf.cell(0, 6, _clean_str(f"Telegram ID: {u.telegram_id}  |  Username: @{u.username or 'N/A'}"), ln=True)
+            pdf.cell(0, 6, _clean_str(f"Phone: {u.phone or 'N/A'}  |  Role: {u.role.upper() if u.role else 'USER'}"), ln=True)
+            pdf.cell(0, 6, _clean_str(f"Current Wallet Balance: INR {u.wallet_balance:.2f}  |  Status: {'Blocked' if u.is_blocked else 'Active'}"), ln=True)
             pdf.ln(6)
             
             user_orders = db.query(Order).filter(Order.user_id == u.id, ~Order.id.like("TOPUP-%")).order_by(Order.created_at.desc()).limit(10).all()
@@ -6234,11 +6264,11 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 pdf.set_font("Helvetica", "", 8)
                 pdf.set_text_color(0, 0, 0)
                 for o in user_orders:
-                    pdf.cell(40, 6, str(o.id), 1)
-                    pdf.cell(45, 6, o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else 'N/A', 1)
-                    pdf.cell(30, 6, f"INR {o.total_payable:.2f}", 1, 0, "R")
-                    pdf.cell(30, 6, str(o.payment_method).upper(), 1, 0, "C")
-                    pdf.cell(35, 6, str(o.status), 1, 1, "C")
+                    pdf.cell(40, 6, _clean_str(str(o.id)), 1)
+                    pdf.cell(45, 6, _clean_str(o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else 'N/A'), 1)
+                    pdf.cell(30, 6, _clean_str(f"INR {o.total_payable:.2f}"), 1, 0, "R")
+                    pdf.cell(30, 6, _clean_str(str(o.payment_method).upper()), 1, 0, "C")
+                    pdf.cell(35, 6, _clean_str(str(o.status)), 1, 1, "C")
             else:
                 pdf.set_font("Helvetica", "I", 9)
                 pdf.set_text_color(128, 128, 128)
@@ -6262,11 +6292,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 pdf.set_font("Helvetica", "", 8)
                 pdf.set_text_color(0, 0, 0)
                 for tx in user_txns:
-                    pdf.cell(45, 6, tx.created_at.strftime('%Y-%m-%d %H:%M') if tx.created_at else 'N/A', 1)
-                    pdf.cell(30, 6, str(tx.type).upper(), 1, 0, "C")
-                    pdf.cell(35, 6, f"INR {tx.amount:.2f}", 1, 0, "R")
-                    desc_safe = (tx.description or 'N/A')[:40].encode('latin-1', 'replace').decode('latin-1')
-                    pdf.cell(70, 6, desc_safe, 1, 1, "L")
+                    pdf.cell(45, 6, _clean_str(tx.created_at.strftime('%Y-%m-%d %H:%M') if tx.created_at else 'N/A'), 1)
+                    pdf.cell(30, 6, _clean_str(str(tx.type).upper()), 1, 0, "C")
+                    pdf.cell(35, 6, _clean_str(f"INR {tx.amount:.2f}"), 1, 0, "R")
+                    pdf.cell(70, 6, _clean_str((tx.description or 'N/A')[:40]), 1, 1, "L")
             else:
                 pdf.set_font("Helvetica", "I", 9)
                 pdf.set_text_color(128, 128, 128)
@@ -9055,6 +9084,15 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 ]
             }
         )
+        return
+
+    else:
+        # Fallback for unmatched inline callback data: answer callback query immediately to stop Telegram loading spinner
+        try:
+            await answer_callback_query(callback_query_id)
+        except Exception:
+            pass
+        return
 
 async def process_bot_callback_task(telegram_id: str, first_name: str, last_name: str, username: str, data: str, message_id: int, callback_query_id: str):
     """Processes callback query button clicks in a concurrent background task."""
