@@ -8495,25 +8495,53 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "⚠️ Payment QR session expired!", show_alert=True)
             return
 
-        session["state"] = f"waiting_for_utr_{order.id}"
+        order.status = "Pending Verification"
+        ref_code = f"{'TOPUP-REF' if order.id.startswith('TOPUP-') else 'BOT-TXN'}-{uuid.uuid4().hex[:6].upper()}"
+        order.transaction_id = ref_code
+        
+        h = OrderStatusHistory(order_id=order.id, status="Pending Verification", note="Customer marked payment as completed")
+        db.add(h)
+        db.commit()
+        auto_save_persistent_db_state(db)
+        
+        session["state"] = None
         sync_user_db_session(db, user, session)
 
-        utr_prompt_text = (
-            f"🔢 <b>Submit 12-Digit UPI UTR Number</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"• <b>Order Reference:</b> <code>{order.id}</code>\n"
-            f"• <b>Total Amount Paid:</b> <b>₹{order.total_payable:.2f}</b>\n\n"
-            f"Please type your <b>12-digit UPI UTR / Transaction Ref ID</b> (from Google Pay, PhonePe, Paytm, BHIM, etc.) and send it in this chat.\n\n"
-            f"<i>Example: 423456789012</i>\n\n"
-            f"<i>If you cannot locate your UTR number right now, tap <b>⏩ Skip UTR & Submit for Review</b> below.</i>"
+        # Notify Admin
+        admin_alert = (
+            f"📥 <b>New Payment Verification Request</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🆔 <b>Order ID:</b> <code>{order.id}</code>\n"
+            f"👤 <b>Customer:</b> <b>{escape_html(user.display_name)}</b> (ID: <code>{user.telegram_id}</code>)\n"
+            f"💵 <b>Amount:</b> <b>₹{order.total_payable:.2f}</b>\n"
+            f"🔢 <b>Reference:</b> <code>{ref_code}</code>\n\n"
+            f"<i>Please verify receipt in UPI merchant app and approve/reject below.</i>"
         )
-        utr_markup = {
+        action_buttons = [
+            [
+                {"text": "✅ Approve Deposit/Order", "callback_data": f"admin_dep_approve_{order.id}" if order.id.startswith("TOPUP-") else f"admin_act_approve_{order.id}"},
+                {"text": "❌ Reject", "callback_data": f"admin_dep_reject_{order.id}" if order.id.startswith("TOPUP-") else f"admin_act_reject_{order.id}"}
+            ]
+        ]
+        await notify_admins(db, admin_alert, reply_markup={"inline_keyboard": action_buttons})
+
+        conf_text = (
+            f"⏳ <b>Payment Submitted for Verification!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🆔 <b>Order / Deposit ID:</b> <code>{order.id}</code>\n"
+            f"💵 <b>Amount:</b> <b>₹{order.total_payable:.2f}</b>\n"
+            f"🔢 <b>Transaction Ref:</b> <code>{ref_code}</code>\n\n"
+            f"<i>Our support team will verify your payment and process your request shortly! 🍕</i>"
+        )
+        conf_markup = {
             "inline_keyboard": [
-                [{"text": "⏩ Skip UTR & Submit for Review", "callback_data": f"pay_skip_utr_{order.id}"}],
-                [{"text": "❌ Cancel Order", "callback_data": f"cancel_order_{order.id}"}]
+                [{"text": "📦 Track Status", "callback_data": f"track_refresh_{order.id}"}],
+                [{"text": "📞 Contact Support", "callback_data": "support_menu"}]
             ]
         }
-        await edit_bot_message(user.telegram_id, message_id, utr_prompt_text, reply_markup=utr_markup)
+        await edit_bot_message(user.telegram_id, message_id, conf_text, reply_markup=conf_markup)
+        await answer_callback_query(callback_query_id, "Payment submitted for verification!")
+        return
 
 
     elif data.startswith("regen_qr_"):
@@ -9091,6 +9119,18 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await send_bot_photo_bytes(user.telegram_id, qr_bytes, f"UPI_QR_{order.id}.png", caption)
         else:
             await send_bot_photo(user.telegram_id, upi_details["qr_code_url"], caption)
+
+        # Edit the parent message inline keyboard to hide the Download QR Image button
+        new_markup = {
+            "inline_keyboard": [
+                [{"text": "✅ I Have Paid / Verify Payment", "callback_data": f"wallet_marked_paid_{order.id}"}],
+                [{"text": "❌ Cancel Request", "callback_data": f"wallet_cancel_deposit_{order.id}" if order.id.startswith("TOPUP-") else f"cancel_order_{order.id}"}]
+            ]
+        }
+        try:
+            await edit_bot_message(user.telegram_id, message_id, None, reply_markup=new_markup)
+        except Exception:
+            pass
             
         await answer_callback_query(callback_query_id, "QR Image sent to chat!")
         return
