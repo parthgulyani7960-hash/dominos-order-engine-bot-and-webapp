@@ -1412,11 +1412,12 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         <a id="paytmBtn" href="{paytm_intent}" class="btn btn-paytm">🔷 Pay via Paytm</a>
         <a id="openUpiBtn" href="{upi_uri}" class="btn btn-secondary">⚡ Pay via Any UPI App</a>
         
+        <button id="markPaidBtn" onclick="markPaid()" class="btn btn-secondary" style="margin-top: 14px; background: #16a34a; color: white;">✅ I Have Completed Payment</button>
         <button id="newPayBtn" onclick="generateNewPaymentLink()" class="btn btn-action" style="display: none;">➕ Generate New Payment Link</button>
         <a id="supportBtn" href="https://t.me/DominoOrderEngineSupportBot?text=Report+Payment+Issue+Ref+{order.id}" target="_blank" class="btn btn-secondary" style="margin-top: 10px; font-size: 13px;">💬 Contact Support / Report Issue</a>
         
         <p style="font-size: 11px; color: #64748b; margin-top: 16px; line-height: 1.4;">
-            📡 Live Bank Auto-Tracking active. Screen automatically updates upon real payment confirmation.
+            📡 Live Auto-Tracking active. Tap "I Have Completed Payment" or return from app to verify.
         </p>
     </div>
 
@@ -1470,6 +1471,7 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
                 document.getElementById('gpayBtn').style.display = 'none';
                 document.getElementById('paytmBtn').style.display = 'none';
                 document.getElementById('openUpiBtn').style.display = 'none';
+                document.getElementById('markPaidBtn').style.display = 'none';
                 document.getElementById('newPayBtn').style.display = 'block';
             }} else {{
                 timeLeftSeconds--;
@@ -1491,7 +1493,7 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
             checkStatus();
         }});
 
-        // Real-time Status Poller — Server-Verified Credit Tracking
+        // Real-time Status Poller
         async function checkStatus() {{
             try {{
                 const res = await fetch('/api/pay_status/{order.id}');
@@ -1505,6 +1507,12 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
                         badge.style.background = '#16a34a';
                         badge.style.color = '#fff';
                         badge.innerHTML = '✅ Payment Confirmed & Verified!';
+                        const btn = document.getElementById('markPaidBtn');
+                        if (btn) {{
+                            btn.style.background = '#16a34a';
+                            btn.innerHTML = '✅ Payment Verified';
+                            btn.disabled = true;
+                        }}
                     }} else if (data.verified) {{
                         badge.style.background = '#eab308';
                         badge.style.color = '#000';
@@ -1516,6 +1524,27 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
                     }}
                 }}
             }} catch (e) {{}}
+        }}
+
+        async function markPaid() {{
+            if (isProcessing) return;
+            const btn = document.getElementById('markPaidBtn');
+            btn.innerHTML = '<span class="spinner"></span> Verifying...';
+            btn.disabled = true;
+            try {{
+                const res = await fetch('/api/pay_mark_paid/{order.id}', {{ method: 'POST' }});
+                if (res.ok) {{
+                    btn.style.background = '#16a34a';
+                    btn.innerHTML = '✅ Submitted for Verification!';
+                    checkStatus();
+                }} else {{
+                    btn.disabled = false;
+                    btn.innerHTML = '✅ I Have Completed Payment';
+                }}
+            }} catch (e) {{
+                btn.disabled = false;
+                btn.innerHTML = '✅ I Have Completed Payment';
+            }}
         }}
 
         // Poll status every 2 seconds
