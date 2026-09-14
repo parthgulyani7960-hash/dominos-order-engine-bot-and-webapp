@@ -73,6 +73,7 @@ async def lifespan(app: FastAPI):
     _bg_tasks: list[asyncio.Task] = [
         asyncio.create_task(run_bot_polling(), name="bot_polling"),
         asyncio.create_task(schedule_daily_backup(), name="daily_backup"),
+        asyncio.create_task(schedule_periodic_firebase_sync(), name="firebase_sync"),
     ]
     logger.info("Domino's Order Engine Platform v2.0 started successfully!")
 
@@ -956,6 +957,17 @@ async def schedule_daily_backup():
                 logger.info(f"Daily backup success: {backup_file}")
         except Exception as e:
             logger.error(f"Backup failed: {e}")
+
+
+async def schedule_periodic_firebase_sync():
+    """Triggers an automatic Firebase cloud state sync every 30 seconds."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            from .database import auto_save_persistent_db_state
+            await asyncio.to_thread(auto_save_persistent_db_state)
+        except Exception as e:
+            logger.warning(f"Periodic Firebase cloud sync failed: {e}")
 
 
 # --- API and Static Routes ---

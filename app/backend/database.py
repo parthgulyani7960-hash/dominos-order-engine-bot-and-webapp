@@ -39,6 +39,8 @@ DATABASE_URL: str = os.getenv(
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+from sqlalchemy.pool import NullPool
+
 _IS_SQLITE: bool = DATABASE_URL.startswith("sqlite")
 _connect_args: dict = {"check_same_thread": False, "timeout": 60} if _IS_SQLITE else {}
 
@@ -49,12 +51,16 @@ _engine_kwargs: dict = dict(
     pool_pre_ping=True,
     future=True,
 )
-if not _IS_MEMORY_SQLITE:
-    # Memory SQLite uses SingletonThreadPool which rejects these args
+
+if _IS_SQLITE and not _IS_MEMORY_SQLITE:
+    # Use NullPool for SQLite to prevent connection pool exhaustion under async concurrency
+    _engine_kwargs["poolclass"] = NullPool
+elif not _IS_MEMORY_SQLITE:
     _engine_kwargs.update(
-        pool_size=5 if _IS_SQLITE else 20,
-        max_overflow=0 if _IS_SQLITE else 40,
-        pool_timeout=60,
+        pool_size=50,
+        max_overflow=100,
+        pool_recycle=300,
+        pool_timeout=30,
     )
 
 engine = create_engine(DATABASE_URL, **_engine_kwargs)
@@ -136,10 +142,10 @@ class User(TimestampMixin, Base):
     @address.setter
     def address(self, val: str | None) -> None:
         self._temp_address = val
-        if self.saved_addresses:
+        if val and val.strip() and self.saved_addresses:
             default_addr = next((sa for sa in self.saved_addresses if sa.is_default), self.saved_addresses[0])
             if default_addr:
-                default_addr.full_address = val
+                default_addr.full_address = val.strip()
 
     __table_args__ = (
         Index("ix_users_role_created", "role", "created_at"),
@@ -255,6 +261,8 @@ class Order(TimestampMixin, Base):
     screenshot_url        = Column(String, nullable=True)
     wallet_applied        = Column(Float, default=0.0)  # Amount paid via wallet balance
     upi_paid              = Column(Float, default=0.0)  # Amount paid via UPI / Direct Payment
+    claimed_by_admin_id   = Column(String, nullable=True)  # Single-admin claiming lock
+    claimed_by_admin_name = Column(String, nullable=True)  # Admin display name for claiming lock
     version               = Column(Integer, default=0, nullable=False)  # optimistic locking
 
     user           = relationship("User", back_populates="orders")
@@ -605,8 +613,8 @@ PERSISTENT_FILE_ID_PATH = os.path.join(DATA_DIR, "latest_snapshot_file_id.txt")
 
 FIREBASE_KEY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firebase-key.json")
 
-def upload_snapshot_to_firebase(data: dict) -> bool:
-    """Uploads database snapshot silently to Firebase Realtime Database without sending Telegram document messages."""
+def upload_snapshot_to_firebase(data: dict, entity_type: str = None, entity_data: dict = None) -> bool:
+    """Uploads database snapshot or specific entity delta updates silently to Firebase Realtime Database."""
     if not os.path.exists(FIREBASE_KEY_PATH):
         return False
     try:
@@ -622,8 +630,12 @@ def upload_snapshot_to_firebase(data: dict) -> bool:
             app = firebase_admin.get_app()
             
         ref = fb_db.reference('persistent_db_state', app=app)
-        ref.set(data)
-        logger.info("[PERSISTENCE] Successfully saved DB snapshot to Firebase Realtime Database!")
+        if entity_type and entity_data:
+            ref.child(entity_type).update(entity_data)
+            logger.info(f"[PERSISTENCE] Delta-synced {entity_type} update to Firebase!")
+        else:
+            ref.set(data)
+            logger.info("[PERSISTENCE] Successfully saved DB snapshot to Firebase Realtime Database!")
         return True
     except Exception as e:
         logger.warning(f"[PERSISTENCE] Firebase save failed: {e}")
@@ -765,6 +777,14 @@ def auto_save_persistent_db_state(db=None) -> bool:
         db = SessionLocal()
         close_after = True
     try:
+        # Clean up support messages older than 24 hours
+        try:
+            cutoff_24h = datetime.datetime.utcnow() - datetime.timedelta(hours=24)
+            db.query(SupportMessage).filter(SupportMessage.created_at < cutoff_24h).delete(synchronize_session=False)
+            db.commit()
+        except Exception:
+            pass
+
         users = db.query(User).all()
         orders = db.query(Order).all()
         saved_addresses = db.query(SavedAddress).all()
@@ -785,6 +805,7 @@ def auto_save_persistent_db_state(db=None) -> bool:
                 "longitude": float(u.longitude) if u.longitude is not None else None,
                 "wallet_balance": float(u.wallet_balance or 0.0),
                 "is_admin": (u.role == "admin"),
+                "is_blocked": bool(u.is_blocked),
                 "bot_state": u.bot_state,
                 "bot_cart": u.bot_cart,
                 "telegram_verified": bool(u.telegram_verified),
@@ -948,6 +969,7 @@ def auto_restore_persistent_db_state(db) -> bool:
                     longitude=u_data.get("longitude"),
                     wallet_balance=float(u_data.get("wallet_balance", 0.0)),
                     role="admin" if bool(u_data.get("is_admin", False)) else "user",
+                    is_blocked=bool(u_data.get("is_blocked", False)),
                     bot_state=u_data.get("bot_state"),
                     bot_cart=u_data.get("bot_cart"),
                     telegram_verified=bool(u_data.get("telegram_verified", False))
@@ -958,6 +980,8 @@ def auto_restore_persistent_db_state(db) -> bool:
                 restored_users += 1
             else:
                 # Synchronize ALL details for existing returning user
+                if "is_blocked" in u_data:
+                    existing.is_blocked = bool(u_data["is_blocked"])
                 b_bal = float(u_data.get("wallet_balance", 0.0))
                 if b_bal > existing.wallet_balance:
                     existing.wallet_balance = b_bal
@@ -985,7 +1009,7 @@ def auto_restore_persistent_db_state(db) -> bool:
                     id=sa_data["id"],
                     user_id=sa_data["user_id"],
                     label=sa_data.get("label", "Home"),
-                    full_address=sa_data.get("full_address"),
+                    full_address=sa_data.get("full_address") or "Saved Address",
                     latitude=sa_data.get("latitude"),
                     longitude=sa_data.get("longitude"),
                     city=sa_data.get("city"),
@@ -993,6 +1017,8 @@ def auto_restore_persistent_db_state(db) -> bool:
                 )
                 db.add(sa)
                 restored_addrs += 1
+            elif not existing_sa.full_address or not existing_sa.full_address.strip():
+                existing_sa.full_address = sa_data.get("full_address") or "Saved Address"
 
         restored_orders = 0
         for o_data in data.get("orders", []):
@@ -1149,6 +1175,10 @@ def init_db() -> None:
             conn.execute(text("ALTER TABLE orders ADD COLUMN wallet_applied FLOAT DEFAULT 0.0"))
         if "upi_paid" not in order_cols:
             conn.execute(text("ALTER TABLE orders ADD COLUMN upi_paid FLOAT DEFAULT 0.0"))
+        if "claimed_by_admin_id" not in order_cols:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN claimed_by_admin_id VARCHAR"))
+        if "claimed_by_admin_name" not in order_cols:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN claimed_by_admin_name VARCHAR"))
             
         # Support messages columns
         support_cols = [c["name"] for c in insp.get_columns("support_messages")]

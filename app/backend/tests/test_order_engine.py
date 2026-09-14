@@ -152,3 +152,38 @@ def test_order_validator_cart_items(db_session):
     # Unmapped products must trigger a warning but still be valid
     assert len(result.warnings) > 0
     assert result.ok is True
+
+
+def test_active_offer_cart_resolution_and_rendering(db_session, test_user):
+    from app.backend.database import ActiveOffer
+    from app.backend.bot import resolve_cart_item, render_cart_message
+
+    offer = ActiveOffer(
+        offer_key="test_deal_1",
+        title="2 Regular Veg Pizzas @ ₹199",
+        badge="SAVE 40%",
+        button_text="🛒 Add Deal",
+        original_price=350.0,
+        discounted_price=199.0,
+        items_json='[{"name": "Margherita", "size": "Regular", "qty": 1}, {"name": "Farmhouse", "size": "Regular", "qty": 1}]'
+    )
+    db_session.add(offer)
+    db_session.commit()
+
+    # Test resolve_cart_item with offer_ key
+    item_type, obj, item_name, unit_price, items_breakdown = resolve_cart_item(db_session, "offer_test_deal_1")
+    assert item_type == "offer"
+    assert item_name == "2 Regular Veg Pizzas @ ₹199"
+    assert unit_price == 199.0
+    assert len(items_breakdown) == 2
+
+    # Test render_cart_message formatting
+    cart = {"offer_test_deal_1": 1}
+    session = {}
+    cart_text, kbd = render_cart_message(db_session, test_user, cart, session)
+
+    assert "2 Regular Veg Pizzas @ ₹199" in cart_text
+    assert "₹199" in cart_text
+    assert "Margherita (Regular)" in cart_text
+    assert "Farmhouse (Regular)" in cart_text
+

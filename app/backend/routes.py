@@ -2644,12 +2644,17 @@ async def save_address(payload: SavedAddressSchema, db: Session = Depends(get_db
             user.city = city
         user.latitude = payload.latitude
         user.longitude = payload.longitude
+    fallback_addr = (
+        (payload.full_address and payload.full_address.strip())
+        or (f"{city}, Location Pin" if city else None)
+        or (f"GPS Location ({payload.latitude:.4f}, {payload.longitude:.4f})" if payload.latitude and payload.longitude else None)
+    ) or "Saved Address"
     addr = SavedAddress(
         user_id=user.id,
-        label=payload.label,
-        full_address=payload.full_address,
+        label=payload.label or "Home",
+        full_address=fallback_addr,
         landmark=payload.landmark,
-        city=payload.city,
+        city=payload.city or city,
         state=payload.state,
         pincode=payload.pincode,
         latitude=payload.latitude,

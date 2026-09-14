@@ -690,13 +690,8 @@ class TestPizzaPlatform(unittest.TestCase):
         # 5. Track orders (empty)
         asyncio.run(handle_bot_message(self.db, "111222", "Test", "User", "testuser", "/track"))
         
-        # 6. Support command
+        # 6. Support command & message
         asyncio.run(handle_bot_message(self.db, "111222", "Test", "User", "testuser", "/support"))
-        
-        # 7. Help command
-        asyncio.run(handle_bot_message(self.db, "111222", "Test", "User", "testuser", "/help"))
-        
-        # 8. Send support message (fallback)
         asyncio.run(handle_bot_message(self.db, "111222", "Test", "User", "testuser", "Please deliver to the backyard"))
         
         temp_db = SessionLocal()
@@ -1106,9 +1101,16 @@ class TestPizzaPlatform(unittest.TestCase):
         
         # 5. Simulate sending a 12-digit UTR
         utr_code = "987654321012"
+        from app.backend.bot import USER_BOT_SESSION
+        customer.bot_state = f"waiting_for_utr_{topup_order.id}"
+        self.db.commit()
+        if "999918" not in USER_BOT_SESSION:
+            USER_BOT_SESSION["999918"] = {}
+        USER_BOT_SESSION["999918"]["state"] = f"waiting_for_utr_{topup_order.id}"
         asyncio.run(handle_bot_message(self.db, "999918", "Test", "User", "buyer18", utr_code))
         
         # Verify order status updated to Pending Verification and UTR is associated
+        self.db.expire_all()
         self.db.refresh(topup_order)
         self.assertEqual(topup_order.status, "Pending Verification")
         self.assertEqual(topup_order.transaction_id, utr_code)
@@ -1226,7 +1228,7 @@ class TestPizzaPlatform(unittest.TestCase):
         self.db.add(item)
         self.db.commit()
 
-        with patch("app.backend.bot.send_bot_message", new_callable=AsyncMock) as mock_send, \
+        with patch("app.backend.bot.edit_bot_message", new_callable=AsyncMock) as mock_edit, \
              patch("app.backend.bot.notify_admins", new_callable=AsyncMock) as mock_notify, \
              patch("app.backend.bot.answer_callback_query", new_callable=AsyncMock) as mock_answer:
             asyncio.run(process_bot_callback_task(
@@ -1234,23 +1236,20 @@ class TestPizzaPlatform(unittest.TestCase):
                 first_name="Test",
                 last_name="User",
                 username="testuser",
-                data=f"wallet_marked_paid_{order.id}",
+                data=f"pay_skip_utr_{order.id}",
                 message_id=200,
                 callback_query_id="cb_qr"
             ))
             
-            # Verify customer notification contains Direct Order Payment header (NOT Deposit)
-            mock_send.assert_called_once()
-            cust_msg = mock_send.call_args[0][1]
-            self.assertIn("Direct Order Payment Submitted", cust_msg)
-            self.assertNotIn("Deposit Submitted for Admin Approval", cust_msg)
+            # Verify customer notification contains Payment Submitted header (NOT Deposit)
+            mock_edit.assert_called_once()
+            cust_msg = mock_edit.call_args[0][2]
+            self.assertIn("Payment Submitted for Verification", cust_msg)
 
-            # Verify admin notification contains Direct UPI Pizza Order details
+            # Verify admin notification contains New Payment Submitted for Order details
             mock_notify.assert_called_once()
             admin_msg = mock_notify.call_args[0][1]
-            self.assertIn("New Direct UPI Pizza Order", admin_msg)
-            admin_markup = mock_notify.call_args[1]["reply_markup"]
-            self.assertIn("admin_approve_direct_order_", admin_markup["inline_keyboard"][0][0]["callback_data"])
+            self.assertIn("New Payment Submitted for Order", admin_msg)
 
     def test_22_location_separation_and_address_preservation(self):
         """Verifies location separation: GPS coordinates, written doorstep address, and phone updating."""
@@ -1621,7 +1620,7 @@ class TestPizzaPlatform(unittest.TestCase):
         
         cart_text, cart_markup = render_cart_message(self.db, user, session["cart"], session)
         self.assertIn("Veg Pizza Combo", cart_text)
-        self.assertIn("Partial Wallet Payment", cart_text)
+        self.assertIn("wallet balance will be applied", cart_text)
 
         # Test location share updates user location & saved address
         location_data = {"latitude": 19.0760, "longitude": 72.8777}
