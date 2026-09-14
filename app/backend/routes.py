@@ -1091,17 +1091,9 @@ async def get_pay_status(order_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/pay_mark_paid/{order_id}")
-async def mark_order_paid_web(order_id: str, request: Request = None, db: Session = Depends(get_db)):
+async def mark_order_paid_web(order_id: str, db: Session = Depends(get_db)):
     """Marks payment status as Pending Verification and alerts admins on Telegram for manual approval."""
     try:
-        utr_val = ""
-        if request:
-            try:
-                data = await request.json()
-                utr_val = str(data.get("utr", "")).strip() if data else ""
-            except Exception:
-                pass
-
         order = db.query(Order).filter(Order.id == order_id).first()
         if not order:
             return {"success": False, "message": "Order not found"}
@@ -1110,17 +1102,12 @@ async def mark_order_paid_web(order_id: str, request: Request = None, db: Sessio
         if order.status in ("Completed", "Approved", "Paid", "Order Processing"):
             return {"success": True, "status": order.status, "already_processed": True}
             
-        ref_code = f"UTR-{utr_val}" if utr_val else f"{'TOPUP-REF' if order.id.startswith('TOPUP-') else 'BOT-TXN'}-{uuid.uuid4().hex[:6].upper()}"
+        ref_code = f"{'TOPUP-REF' if order.id.startswith('TOPUP-') else 'BOT-TXN'}-{uuid.uuid4().hex[:6].upper()}"
         order.transaction_id = ref_code
         order.status = "Pending Verification"
         
-        if utr_val:
-            from .database import UTRAttempt
-            attempt = UTRAttempt(order_id=order.id, utr=utr_val, is_successful=False)
-            db.add(attempt)
-            
         from .database import OrderStatusHistory
-        h = OrderStatusHistory(order_id=order.id, status="Pending Verification", note=f"User marked paid via web link (UTR: {utr_val or 'None'})")
+        h = OrderStatusHistory(order_id=order.id, status="Pending Verification", note="User marked paid via web link")
         db.add(h)
             
         db.commit()
@@ -1133,8 +1120,7 @@ async def mark_order_paid_web(order_id: str, request: Request = None, db: Sessio
                     f"⏳ <b>Payment Submitted for Verification!</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━\n"
                     f"🆔 <b>Ref ID:</b> <code>{order.id}</code>\n"
-                    f"💵 <b>Amount:</b> ₹{order.total_payable:.2f}\n"
-                    f"🔢 <b>Submitted UTR:</b> <code>{utr_val or 'Not provided'}</code>\n\n"
+                    f"💵 <b>Amount:</b> ₹{order.total_payable:.2f}\n\n"
                     f"Your payment has been logged and is awaiting Admin Verification. Your wallet will be credited as soon as approved!"
                 )
                 user_markup = {
@@ -1156,7 +1142,7 @@ async def mark_order_paid_web(order_id: str, request: Request = None, db: Sessio
                 f"👤 <b>User:</b> {order.user.display_name if order.user else 'Unknown'} (ID: <code>{order.user.telegram_id if order.user else 'N/A'}</code>)\n"
                 f"🆔 <b>Ref ID:</b> <code>{order.id}</code>\n"
                 f"💵 <b>Amount:</b> <b>₹{order.total_payable:.2f}</b>\n"
-                f"🔢 <b>UTR / Reference:</b> <code>{utr_val or ref_code}</code>\n"
+                f"🔢 <b>Reference Token:</b> <code>{ref_code}</code>\n"
                 f"⌛ <b>Status:</b> Pending Admin Approval"
             )
             admin_markup = {
@@ -1175,59 +1161,6 @@ async def mark_order_paid_web(order_id: str, request: Request = None, db: Sessio
     except Exception as e:
         db.rollback()
         return {"success": False, "error": str(e), "status": "Error"}
-
-
-@router.post("/verify_utr_web/{order_id}")
-async def verify_utr_web(order_id: str, payload: dict, db: Session = Depends(get_db)):
-    """Verifies a 12-digit UTR directly from the web redirect payment page."""
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if not order:
-        return JSONResponse(status_code=404, content={"success": False, "detail": "Order not found"})
-        
-    raw_utr = str(payload.get("utr", "")).strip()
-    if not (len(raw_utr) == 12 and raw_utr.isdigit()):
-        attempt = UTRAttempt(order_id=order_id, utr=raw_utr, is_successful=False)
-        db.add(attempt)
-        db.commit()
-        return JSONResponse(status_code=400, content={"success": False, "detail": "Invalid UTR format. Must be exactly 12 numeric digits."})
-        
-    # Check if UTR already used
-    existing_attempt = db.query(UTRAttempt).filter(UTRAttempt.utr == raw_utr, UTRAttempt.is_successful == True).first()
-    if existing_attempt:
-        attempt = UTRAttempt(order_id=order_id, utr=raw_utr, is_successful=False)
-        db.add(attempt)
-        db.commit()
-        return JSONResponse(status_code=400, content={"success": False, "detail": "This 12-digit UTR has already been submitted or used."})
-        
-    order.status = "Pending Verification"
-    ref_code = f"UTR-{raw_utr}"
-    order.transaction_id = ref_code
-    
-    attempt = UTRAttempt(order_id=order_id, utr=raw_utr, is_successful=True)
-    db.add(attempt)
-    db.commit()
-    auto_save_persistent_db_state(db)
-    
-    try:
-        admin_text = (
-            f"📥 <b>New 12-Digit UTR Submitted (via Payment Link)</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🆔 <b>Ref ID:</b> <code>{order.id}</code>\n"
-            f"💵 <b>Amount:</b> ₹{order.total_payable:.2f}\n"
-            f"🔢 <b>Submitted UTR:</b> <code>{raw_utr}</code>"
-        )
-        admin_markup = {
-            "inline_keyboard": [
-                [
-                    {"text": "✅ Approve Deposit/Order", "callback_data": f"admin_dep_approve_{order.id}" if order.id.startswith("TOPUP-") else f"admin_act_approve_{order.id}"},
-                    {"text": "❌ Reject", "callback_data": f"admin_dep_reject_{order.id}" if order.id.startswith("TOPUP-") else f"admin_act_reject_{order.id}"}
-                ]
-            ]
-        }
-        await bot.notify_admins(db, admin_text, reply_markup=admin_markup)
-    except Exception:
-        pass
-    return {"success": True, "status": order.status}
 
 
 @router.post("/pay_new/{order_id}")
@@ -1335,13 +1268,7 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         <a id="paytmBtn" href="{paytm_intent}" class="btn btn-paytm">🔷 Pay via Paytm</a>
         <a id="openUpiBtn" href="{upi_uri}" class="btn btn-secondary">⚡ Pay via Any UPI App</a>
         
-        <!-- Optional UTR Input Box -->
-        <div style="margin-top: 14px; text-align: left;">
-            <label style="font-size: 11px; color: #94a3b8; font-weight: 600; display: block; margin-bottom: 4px;">Enter 12-Digit UTR / Transaction ID (Optional):</label>
-            <input type="text" id="utrInput" placeholder="e.g. 426635987123" style="width: 100%; box-sizing: border-box; background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 10px 14px; border-radius: 10px; font-size: 13px; font-family: monospace;" maxlength="24">
-        </div>
-        
-        <button id="markPaidBtn" onclick="markPaid()" class="btn btn-secondary" style="margin-top: 12px; background: #16a34a; color: white;">✅ I Have Completed Payment</button>
+        <button id="markPaidBtn" onclick="markPaid()" class="btn btn-secondary" style="margin-top: 14px; background: #16a34a; color: white;">✅ I Have Completed Payment</button>
         
         <div id="feedbackBox" style="display: none; margin-top: 12px; padding: 12px 14px; border-radius: 12px; font-size: 13px; text-align: left; background: #0f172a; border: 1px solid #334155; color: #38bdf8; line-height: 1.4;"></div>
         
@@ -1464,8 +1391,6 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
                             btn.innerHTML = '⏳ Submitted for Verification';
                             btn.disabled = true;
                         }}
-                        const utrInput = document.getElementById('utrInput');
-                        if (utrInput) utrInput.disabled = true;
                         if (feedback) {{
                             feedback.style.display = 'block';
                             feedback.style.borderColor = '#eab308';
@@ -1492,20 +1417,16 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
 
         async function markPaid() {{
             if (isProcessing) return;
-            const utrVal = (document.getElementById('utrInput').value || '').trim();
             const btn = document.getElementById('markPaidBtn');
             const feedback = document.getElementById('feedbackBox');
             
             btn.innerHTML = '<span class="spinner"></span> Submitting...';
             btn.disabled = true;
-            document.getElementById('utrInput').disabled = true;
             isProcessing = true;
             
             try {{
                 const res = await fetch('/api/pay_mark_paid/{order.id}', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ utr: utrVal }})
+                    method: 'POST'
                 }});
                 if (res.ok) {{
                     btn.style.background = '#eab308';
@@ -1520,13 +1441,11 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
                 }} else {{
                     isProcessing = false;
                     btn.disabled = false;
-                    document.getElementById('utrInput').disabled = false;
                     btn.innerHTML = '✅ I Have Completed Payment';
                 }}
             }} catch (e) {{
                 isProcessing = false;
                 btn.disabled = false;
-                document.getElementById('utrInput').disabled = false;
                 btn.innerHTML = '✅ I Have Completed Payment';
             }}
         }}
