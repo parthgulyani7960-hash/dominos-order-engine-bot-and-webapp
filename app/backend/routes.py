@@ -1128,6 +1128,45 @@ async def mark_order_paid_web(order_id: str, db: Session = Depends(get_db)):
         db.commit()
         auto_save_persistent_db_state(db)
         
+        # Signal Customer on Telegram with confirmation details & direct action buttons
+        try:
+            if order.user and order.user.telegram_id:
+                if order.id.startswith("TOPUP-"):
+                    user_msg = (
+                        f"💳 <b>Wallet Top-Up Confirmed!</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🆔 <b>Ref ID:</b> <code>{order.id}</code>\n"
+                        f"💵 <b>Amount Credited:</b> ₹{order.total_payable:.2f}\n"
+                        f"💰 <b>New Wallet Balance:</b> <b>₹{order.user.wallet_balance:.2f}</b>\n\n"
+                        f"Your wallet balance has been updated automatically!"
+                    )
+                    user_markup = {
+                        "inline_keyboard": [
+                            [
+                                {"text": "🍕 Order Pizza Now", "web_app": {"url": "https://dominos-order-engine-bot-and-webapp-1.onrender.com"}},
+                                {"text": "💬 Contact Support", "url": f"https://t.me/DominoOrderEngineSupportBot?text=Support+Request+{order.id}"}
+                            ]
+                        ]
+                    }
+                else:
+                    user_msg = (
+                        f"🍕 <b>Order Payment Confirmed!</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🆔 <b>Order ID:</b> <code>{order.id}</code>\n"
+                        f"💵 <b>Amount Paid:</b> ₹{order.total_payable:.2f}\n\n"
+                        f"Your order is now being processed automatically!"
+                    )
+                    user_markup = {
+                        "inline_keyboard": [
+                            [
+                                {"text": "💬 Contact Support / Report Issue", "url": f"https://t.me/DominoOrderEngineSupportBot?text=Support+Request+{order.id}"}
+                            ]
+                        ]
+                    }
+                await bot.send_bot_message(order.user.telegram_id, user_msg, reply_markup=user_markup)
+        except Exception:
+            pass
+
         # Notify admins for audit & history report
         try:
             admin_text = (
@@ -1233,6 +1272,7 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         .btn:active {{ transform: scale(0.98); }}
         .btn:disabled {{ opacity: 0.6; cursor: not-allowed; }}
         .btn-secondary {{ background: #334155; color: #cbd5e1; margin-top: 12px; }}
+        .btn-warning {{ background: #eab308; color: #000; font-weight: 800; }}
         .spinner {{ display: inline-block; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }}
         @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
     </style>
@@ -1248,6 +1288,8 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         
         <a id="openUpiBtn" href="{upi_uri}" class="btn">⚡ Open UPI App (GPay/PhonePe/Paytm)</a>
         <button id="markPaidBtn" onclick="markPaid()" class="btn btn-secondary">✅ I Have Completed Payment</button>
+        <button id="retryBtn" onclick="retryPayment()" class="btn btn-warning" style="display: none; margin-top: 12px;">🔄 Retry Payment Link</button>
+        <a id="supportBtn" href="https://t.me/DominoOrderEngineSupportBot?text=Report+Payment+Issue+Ref+{order.id}" target="_blank" class="btn btn-secondary" style="margin-top: 10px; font-size: 14px;">💬 Contact Support / Report Issue</a>
         
         <p style="font-size: 12px; color: #64748b; margin-top: 20px; line-height: 1.5;">
             Automatic session tracking active. Returns from UPI apps trigger real-time instant verification.
@@ -1262,6 +1304,20 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         let isProcessing = false;
         let timeLeftSeconds = 600; // 10 minutes session validity
 
+        function retryPayment() {{
+            timeLeftSeconds = 600;
+            isProcessing = false;
+            document.getElementById('timerClock').innerText = '10:00';
+            const badge = document.getElementById('statusBadge');
+            badge.style.background = '#0284c7';
+            badge.style.color = '#fff';
+            badge.innerText = '⏳ Awaiting Payment...';
+            document.getElementById('openUpiBtn').style.display = 'block';
+            document.getElementById('markPaidBtn').disabled = false;
+            document.getElementById('retryBtn').style.display = 'none';
+            window.location.href = "{upi_uri}";
+        }}
+
         // Session Countdown Timer
         const timerInterval = setInterval(function() {{
             if (timeLeftSeconds <= 0) {{
@@ -1273,6 +1329,7 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
                 badge.innerText = '❌ Payment Session Expired';
                 document.getElementById('openUpiBtn').style.display = 'none';
                 document.getElementById('markPaidBtn').disabled = true;
+                document.getElementById('retryBtn').style.display = 'block';
             }} else {{
                 timeLeftSeconds--;
                 const mins = Math.floor(timeLeftSeconds / 60).toString().padStart(2, '0');
