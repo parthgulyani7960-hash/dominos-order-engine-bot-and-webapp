@@ -183,6 +183,7 @@ async def edit_bot_message(telegram_id: str, message_id: int, text: str, reply_m
     """Edits an existing text message on the user's screen (in-place text updates).
     Falls back to editMessageCaption if target message has media, or send_bot_message if edit fails.
     """
+    text = text or ""
     reply_markup = sanitize_reply_markup(reply_markup)
     if not BOT_TOKEN or BOT_TOKEN == "MOCK_TOKEN":
         logger.debug(f"[MOCK BOT EDIT] Chat: {telegram_id}, Msg: {message_id}, Text: {text}")
@@ -9119,18 +9120,6 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await send_bot_photo_bytes(user.telegram_id, qr_bytes, f"UPI_QR_{order.id}.png", caption)
         else:
             await send_bot_photo(user.telegram_id, upi_details["qr_code_url"], caption)
-
-        # Edit the parent message inline keyboard to hide the Download QR Image button
-        new_markup = {
-            "inline_keyboard": [
-                [{"text": "✅ I Have Paid / Verify Payment", "callback_data": f"wallet_marked_paid_{order.id}"}],
-                [{"text": "❌ Cancel Request", "callback_data": f"wallet_cancel_deposit_{order.id}" if order.id.startswith("TOPUP-") else f"cancel_order_{order.id}"}]
-            ]
-        }
-        try:
-            await edit_bot_message(user.telegram_id, message_id, None, reply_markup=new_markup)
-        except Exception:
-            pass
             
         await answer_callback_query(
             callback_query_id,
