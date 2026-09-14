@@ -8416,8 +8416,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"• <b>Ref ID:</b> <code>{order_id}</code>\n"
             f"• <b>Amount:</b> <b>₹{amount:.2f}</b>\n\n"
-            f"👉 <a href=\"{upi_uri}\"><b>📱 Click Here to Pay via UPI App</b></a> (mobile) or scan the QR code above.\n\n"
-            f"After completing the UPI payment, tap <b>✅ I Have Paid</b> below to submit your request for admin verification."
+            f"⚡ <b>Direct UPI Payment Link (Prefilled):</b>\n"
+            f"👉 <a href=\"{upi_uri}\"><b>📱 Click to Pay ₹{amount:.2f} via GPay / PhonePe / Paytm</b></a>\n\n"
+            f"<i>Tapping the link opens your UPI app with amount ₹{amount:.2f} & Ref <code>{order_id}</code> prefilled automatically!</i>\n\n"
+            f"After completing payment, tap <b>✅ I Have Paid</b> below to submit your request for admin verification."
         )
         
         payment_markup = {
@@ -9424,9 +9426,11 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 f"• <b>Order Reference:</b> <code>{ref_id}</code>\n"
                 f"• <b>Total Amount to Pay:</b> <b>₹{pay_amount:.2f}</b>\n"
                 f"• <b>UPI ID:</b> <code>{upi_id}</code>\n"
-                f"⏳ <i>Note: This QR payment window expires in 10 minutes.</i>\n\n"
-                f"👉 <a href=\"{upi_uri}\"><b>📱 Click Here to Pay ₹{pay_amount:.2f} via UPI App</b></a> or scan the QR code above.\n\n"
-                f"After completing the transfer, tap <b>✅ I Have Paid / Verify Payment</b> below. Our admin team will verify and dispatch your order immediately! 🍕"
+                f"⏳ <i>Note: This payment window expires in 10 minutes.</i>\n\n"
+                f"⚡ <b>Direct UPI Payment Link (Prefilled):</b>\n"
+                f"👉 <a href=\"{upi_uri}\"><b>📱 Click to Pay ₹{pay_amount:.2f} via GPay / PhonePe / Paytm</b></a>\n\n"
+                f"<i>Tapping the link opens your phone's UPI app with amount ₹{pay_amount:.2f} & Ref <code>{order_id}</code> prefilled automatically!</i>\n\n"
+                f"After completing transfer, tap <b>✅ I Have Paid / Verify Payment</b> below. Our admin team will verify and dispatch your order immediately! 🍕"
             )
             pending_markup = {
                 "inline_keyboard": [
