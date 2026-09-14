@@ -1,9 +1,9 @@
 {
   "version": 1.3,
-  "saved_at": "2026-09-14T18:04:42.852034+00:00",
+  "saved_at": "2026-09-14T18:17:27.376272+00:00",
   "users": [
     {
-      "id": "509c2ea1-4369-4580-ba56-eac32c5a0be8",
+      "id": "d166c306-3437-4ad9-9c64-752996cd49f1",
       "telegram_id": "777666",
       "username": "admin",
       "display_name": "Super Admin",
@@ -18,10 +18,10 @@
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-14T18:04:39.933451"
+      "created_at": "2026-09-14T18:17:24.415042"
     },
     {
-      "id": "0fc4b038-5867-4a1e-a4ac-70e4b3cb3912",
+      "id": "1d5106e6-305e-4fcd-8d17-fd7df2dd1496",
       "telegram_id": "777888",
       "username": "stackeruser",
       "display_name": "Stacker User",
@@ -36,7 +36,7 @@
       "bot_state": "waiting_for_details",
       "bot_cart": "{\"offer_deal_1\": 1, \"offer_deal_2\": 1}",
       "telegram_verified": false,
-      "created_at": "2026-09-14T18:04:39.968018"
+      "created_at": "2026-09-14T18:17:24.468106"
     }
   ],
   "saved_addresses": [
@@ -1009,6 +1009,46 @@
       "longitude": 72.8777,
       "city": "Mumbai",
       "is_default": true
+    },
+    {
+      "id": "170019db-65df-40ec-a103-85e52ddb6b3b",
+      "user_id": "5ea86c4c-a0ad-41b5-b049-45442da3e6f5",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "03817a97-8d9f-4ab0-81af-97051e861835",
+      "user_id": "fec17586-bb6e-4dd9-a4c9-9fe0640f7fdc",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "cb06a359-0a5a-4cb1-a4a9-13c180bb522c",
+      "user_id": "a0b6833e-e166-488a-beb3-0f4837f2b2e6",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "f13baa48-788e-41f2-a1fb-801f0e24e725",
+      "user_id": "1d5106e6-305e-4fcd-8d17-fd7df2dd1496",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
     }
   ],
   "orders": [],
@@ -1120,7 +1160,7 @@
       "items_json": "[{\"name\": \"Margherita\", \"size\": \"Regular\", \"qty\": 2}]"
     },
     {
-      "id": "66a1bf28-1e19-4f79-9328-fdaefb4c0837",
+      "id": "81217850-df29-427b-92d6-05f2981a2804",
       "offer_key": "deal_bot_edit_test",
       "title": "Bot Edit Test Deal",
       "badge": "\ud83d\udd25 50% OFF",
@@ -1133,7 +1173,7 @@
       "items_json": null
     },
     {
-      "id": "84f17674-63ff-478c-8969-41d82b2be372",
+      "id": "7ca635e0-8ad0-4c75-b3cd-9b125a5d64d4",
       "offer_key": "deal_rich_combo",
       "title": "Party Fiesta Combo",
       "badge": "\u26a1 50% OFF",

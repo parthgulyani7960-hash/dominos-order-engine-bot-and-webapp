@@ -8422,9 +8422,12 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             f"After completing payment, tap <b>✅ I Have Paid</b> below to submit your request for admin verification."
         )
         
+        base_domain = os.getenv("MINI_APP_URL", "https://dominos-order-engine-bot-and-webapp-1.onrender.com").rstrip('/')
+        pay_link = f"{base_domain}/api/pay_upi/{order_id}"
         payment_markup = {
             "inline_keyboard": [
-                [{"text": "✅ I Have Paid", "callback_data": f"wallet_marked_paid_{order_id}"}],
+                [{"text": f"⚡ Click to Pay ₹{amount:.2f} via UPI App", "url": pay_link}],
+                [{"text": "✅ I Have Paid / Verify Payment", "callback_data": f"wallet_marked_paid_{order_id}"}],
                 [{"text": "❌ Cancel Request", "callback_data": f"wallet_cancel_deposit_{order_id}"}]
             ]
         }
@@ -9431,8 +9434,11 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 f"<i>Tapping the link opens your phone's UPI app with amount ₹{pay_amount:.2f} & Ref <code>{order_id}</code> prefilled automatically!</i>\n\n"
                 f"After completing transfer, tap <b>✅ I Have Paid / Verify Payment</b> below. Our admin team will verify and dispatch your order immediately! 🍕"
             )
+            base_domain = os.getenv("MINI_APP_URL", "https://dominos-order-engine-bot-and-webapp-1.onrender.com").rstrip('/')
+            pay_link = f"{base_domain}/api/pay_upi/{order_id}"
             pending_markup = {
                 "inline_keyboard": [
+                    [{"text": f"⚡ Click to Pay ₹{pay_amount:.2f} via UPI App", "url": pay_link}],
                     [{"text": "✅ I Have Paid / Verify Payment", "callback_data": f"wallet_marked_paid_{order_id}"}],
                     [{"text": "❌ Cancel Order", "callback_data": f"cancel_order_{order_id}"}]
                 ]

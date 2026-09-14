@@ -1073,6 +1073,47 @@ async def geocode_address(address: str) -> tuple:
     return None, None
 
 
+@router.get("/pay_upi/{order_id}")
+async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
+    """Redirects mobile browsers directly to NPCI compliant upi://pay scheme with prefilled parameters."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        return HTMLResponse(content="<h2>Order not found or expired.</h2>", status_code=404)
+        
+    sys_upi = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
+    sys_name = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
+    upi_id = sys_upi.value if sys_upi and sys_upi.value else "pranjalottery@fam"
+    upi_name = sys_name.value if sys_name and sys_name.value else "Domino's Order Engine"
+    
+    pay_amt = order.total_payable
+    note_str = f"Deposit {order.id}" if order.id.startswith("TOPUP-") else f"Order {order.id}"
+    upi_details = generate_upi_qr_details(upi_id, upi_name, pay_amt, order.id, note_str)
+    upi_uri = upi_details["upi_uri"]
+    
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirecting to UPI App...</title>
+    <script>
+        window.location.href = "{upi_uri}";
+    </script>
+</head>
+<body style="font-family: system-ui, -apple-system, sans-serif; text-align: center; padding: 40px; background: #0f172a; color: white;">
+    <h2 style="color: #38bdf8;">Opening GPay / PhonePe / Paytm...</h2>
+    <p style="font-size: 18px;">Payable Amount: <b style="color: #4ade80;">₹{pay_amt:.2f}</b></p>
+    <p style="font-size: 14px; color: #94a3b8;">Reference ID: <code>{order.id}</code></p>
+    <div style="margin-top: 30px;">
+        <a href="{upi_uri}" style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 12px; font-weight: bold; font-size: 16px;">
+            ⚡ Tap Here to Open UPI App
+        </a>
+    </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
 @router.post("/dominos/order")
 async def place_dominos_order(payload: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Place an order via Domino's browser automation.
