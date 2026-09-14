@@ -9132,7 +9132,11 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         except Exception:
             pass
             
-        await answer_callback_query(callback_query_id, "QR Image sent to chat!")
+        await answer_callback_query(
+            callback_query_id,
+            f"📱 QR Image sent to chat!\n\nTap photo → Save to Gallery to pay via Google Pay, PhonePe, or Paytm.",
+            show_alert=True
+        )
         return
 
     elif data.startswith("admin_item_cancel_menu_"):
