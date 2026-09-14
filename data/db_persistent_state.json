@@ -1,10 +1,10 @@
 {
   "version": 1.3,
-  "saved_at": "2026-09-14T19:06:32.548769+00:00",
+  "saved_at": "2026-09-14T19:50:15.824760+00:00",
   "users": [
     {
-      "id": "552662e5-12e0-4bfd-96d8-910047200e74",
-      "telegram_id": "777666",
+      "id": "dbad37f3-39ea-42bf-9b4f-1b22cdd3818f",
+      "telegram_id": "111222",
       "username": "admin",
       "display_name": "Super Admin",
       "phone": null,
@@ -18,25 +18,25 @@
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-14T19:06:29.513225"
+      "created_at": "2026-09-14T19:50:14.411746"
     },
     {
-      "id": "dea3c942-c75d-4a8b-8a3b-2dc7410260a4",
-      "telegram_id": "777888",
-      "username": "stackeruser",
-      "display_name": "Stacker User",
+      "id": "e8a5b341-4515-4980-a3be-93546e3367f6",
+      "telegram_id": "999917",
+      "username": "buyer17",
+      "display_name": "Buyer 17",
       "phone": null,
-      "city": "Mumbai",
-      "address": "Mumbai",
-      "latitude": 19.076,
-      "longitude": 72.8777,
-      "wallet_balance": 250.0,
+      "city": "Bangalore",
+      "address": null,
+      "latitude": 12.9716,
+      "longitude": 77.5946,
+      "wallet_balance": 441.0,
       "is_admin": false,
       "is_blocked": false,
-      "bot_state": "waiting_for_details",
-      "bot_cart": "{\"offer_deal_1\": 1, \"offer_deal_2\": 1}",
+      "bot_state": null,
+      "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-14T19:06:29.561561"
+      "created_at": "2026-09-14T19:50:14.446680"
     }
   ],
   "saved_addresses": [
@@ -1229,9 +1229,161 @@
       "longitude": 72.8777,
       "city": "Mumbai",
       "is_default": true
+    },
+    {
+      "id": "e6ec7e9d-6668-4059-86a7-66b73406fe67",
+      "user_id": "976ed5c2-d428-417b-80c8-824fb42f49c2",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "72cb561b-716c-46b7-b778-ebdf767397de",
+      "user_id": "59a8d774-d21a-4f1a-ae01-f622d6c6275c",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "f2537e6c-20a4-4fb5-9973-572e1c8d9a3f",
+      "user_id": "8007b41c-f932-42ad-931d-9f3f556393bc",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "6f95e58f-af7b-4ac1-841b-55ef88a0688b",
+      "user_id": "b0d9e224-1fad-4153-a705-0e487a8f8df7",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "011a42d9-7005-4a6b-bfaf-f7563fb992c7",
+      "user_id": "cbb4afa2-9704-4e50-8dfb-913333d5717d",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "d081fba0-ae7b-4152-ab11-33d5f42b22c5",
+      "user_id": "ce79869a-9f90-4e8d-86a5-73d839f0a335",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "bf8fbe69-0509-43e6-86e3-d6a91a728e48",
+      "user_id": "e7431ec6-19f6-4da0-9549-6ba05d71687b",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "2c3a08ae-e04c-4171-9331-12de16342cb1",
+      "user_id": "4ca315b9-ad1b-4691-9fb2-12d08cfa019b",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "c46895ff-2974-4bb0-9ab4-3a0a2d619c92",
+      "user_id": "9bc5f62b-9974-44a9-8a0f-a2df3ca2ae82",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "6da12aff-25ab-4b0e-a782-cd9d703df53f",
+      "user_id": "9bd7297f-7a8e-4cdb-9340-2bab783868c8",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "628a795e-087a-4a53-980b-54444d13034a",
+      "user_id": "63da75a7-b02b-435e-8581-251046852b8e",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "04ad0d05-5cf7-4914-be1f-637c88b3ce3a",
+      "user_id": "a2a90cbc-c895-4824-8101-d39c634ccbf8",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
     }
   ],
-  "orders": [],
+  "orders": [
+    {
+      "id": "PIZZA-768FB4EE",
+      "user_id": "e8a5b341-4515-4980-a3be-93546e3367f6",
+      "original_total": 49.0,
+      "total_payable": 59.0,
+      "status": "Order Processing",
+      "payment_method": "wallet",
+      "address": "Store Area",
+      "phone": "+9199991717",
+      "latitude": 12.9716,
+      "longitude": 77.5946,
+      "delivery_instructions": null,
+      "dominos_reference": "DOM-REF-199010",
+      "wallet_applied": 0.0,
+      "upi_paid": 0.0,
+      "transaction_id": "TXN-852A017FDC69",
+      "created_at": "2026-09-14T19:50:15.790678",
+      "items": [
+        {
+          "id": "713676fb-33b7-47cd-ae1d-f727aee7d076",
+          "product_id": "2bcc8fe4-624e-401f-a29a-15006750e1a9",
+          "item_key": null,
+          "item_name": "Classic Pizza Mania (Tomato)",
+          "item_details": null,
+          "quantity": 1,
+          "price": 49.0,
+          "crust": null,
+          "size": null
+        }
+      ]
+    }
+  ],
   "wallet_transactions": [],
   "coupons": [],
   "offers": [
@@ -1340,7 +1492,7 @@
       "items_json": "[{\"name\": \"Margherita\", \"size\": \"Regular\", \"qty\": 2}]"
     },
     {
-      "id": "b69a09ec-058c-4ca8-97cc-6c2817aaec93",
+      "id": "69806f98-74b8-4efc-b921-8b19e303a29f",
       "offer_key": "deal_bot_edit_test",
       "title": "Bot Edit Test Deal",
       "badge": "\ud83d\udd25 50% OFF",
@@ -1353,7 +1505,7 @@
       "items_json": null
     },
     {
-      "id": "7781056f-e532-45b8-b882-f86601d9bfce",
+      "id": "5d9617d3-a681-4f05-9d93-69891fc7e3d7",
       "offer_key": "deal_rich_combo",
       "title": "Party Fiesta Combo",
       "badge": "\u26a1 50% OFF",
