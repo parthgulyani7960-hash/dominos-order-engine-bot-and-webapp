@@ -1196,6 +1196,7 @@ def get_mini_app_url(db: Session = None) -> str:
     global _MINI_APP_URL_CACHE, _MINI_APP_URL_LAST_UPDATE
     import time
     now = time.time()
+    prod_domain = "https://dominos-order-engine-bot-and-webapp-1.onrender.com"
     if _MINI_APP_URL_CACHE is None or now - _MINI_APP_URL_LAST_UPDATE > 10.0:
         close_db = False
         if db is None:
@@ -1205,15 +1206,23 @@ def get_mini_app_url(db: Session = None) -> str:
             cfg = db.query(SystemConfig).filter(SystemConfig.key == "mini_app_url").first()
             if cfg and cfg.value:
                 val = cfg.value.strip()
-                if "testserver" not in val.lower():
+                if not any(bad in val.lower() for bad in ("testserver", "serveo", "ngrok", "loca.lt")):
                     _MINI_APP_URL_CACHE = val
-                _MINI_APP_URL_LAST_UPDATE = now
+                else:
+                    _MINI_APP_URL_CACHE = prod_domain
+                    cfg.value = prod_domain
+                    db.commit()
+            else:
+                _MINI_APP_URL_CACHE = prod_domain
+                db.add(SystemConfig(key="mini_app_url", value=prod_domain))
+                db.commit()
+            _MINI_APP_URL_LAST_UPDATE = now
         except Exception:
             pass
         finally:
             if close_db:
                 db.close()
-    return _MINI_APP_URL_CACHE if _MINI_APP_URL_CACHE is not None else os.getenv("MINI_APP_URL", "https://dominos-order-engine-bot-and-webapp-1.onrender.com")
+    return _MINI_APP_URL_CACHE if _MINI_APP_URL_CACHE is not None else os.getenv("MINI_APP_URL", prod_domain)
 
 _BOT_FEE_CACHE = None
 _BOT_FEE_LAST_UPDATE = 0
