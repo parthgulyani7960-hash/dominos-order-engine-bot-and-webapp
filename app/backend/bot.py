@@ -8424,7 +8424,6 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         
         payment_markup = {
             "inline_keyboard": [
-                [{"text": "📥 Download QR Image", "callback_data": f"download_qr_{order_id}"}],
                 [{"text": "✅ I Have Paid", "callback_data": f"wallet_marked_paid_{order_id}"}],
                 [{"text": "❌ Cancel Request", "callback_data": f"wallet_cancel_deposit_{order_id}"}]
             ]
@@ -9434,7 +9433,6 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             )
             pending_markup = {
                 "inline_keyboard": [
-                    [{"text": "📥 Download QR Image", "callback_data": f"download_qr_{order_id}"}],
                     [{"text": "✅ I Have Paid / Verify Payment", "callback_data": f"wallet_marked_paid_{order_id}"}],
                     [{"text": "❌ Cancel Order", "callback_data": f"cancel_order_{order_id}"}]
                 ]
