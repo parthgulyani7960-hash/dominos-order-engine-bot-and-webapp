@@ -1073,9 +1073,62 @@ async def geocode_address(address: str) -> tuple:
     return None, None
 
 
+@router.get("/pay_status/{order_id}")
+async def get_pay_status(order_id: str, db: Session = Depends(get_db)):
+    """Returns real-time payment verification status for the given order/deposit ID."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        return {"status": "not_found", "verified": False}
+    
+    verified = order.status in ("Pending Verification", "Order Processing", "Completed", "Approved", "Paid")
+    return {
+        "order_id": order.id,
+        "status": order.status,
+        "verified": verified,
+        "completed": order.status in ("Order Processing", "Completed", "Approved"),
+        "cancelled": order.status in ("Cancelled", "Rejected", "Failed")
+    }
+
+
+@router.post("/pay_mark_paid/{order_id}")
+async def mark_order_paid_web(order_id: str, db: Session = Depends(get_db)):
+    """Allows web payment page to mark payment as completed for verification."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        return {"success": False, "message": "Order not found"}
+    if order.status not in ("Pending Verification", "Completed", "Approved", "Paid", "Order Processing"):
+        order.status = "Pending Verification"
+        ref_code = f"{'TOPUP-REF' if order.id.startswith('TOPUP-') else 'BOT-TXN'}-{uuid.uuid4().hex[:6].upper()}"
+        order.transaction_id = ref_code
+        db.commit()
+        auto_save_persistent_db_state(db)
+        
+        # Notify admins
+        try:
+            admin_text = (
+                f"📥 <b>New Payment Verification Request (via Web Redirect)</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🆔 <b>Ref ID:</b> <code>{order.id}</code>\n"
+                f"💵 <b>Amount:</b> ₹{order.total_payable:.2f}\n"
+                f"🔢 <b>Reference Token:</b> <code>{ref_code}</code>"
+            )
+            admin_markup = {
+                "inline_keyboard": [
+                    [
+                        {"text": "✅ Approve Deposit/Order", "callback_data": f"admin_dep_approve_{order.id}" if order.id.startswith("TOPUP-") else f"admin_act_approve_{order.id}"},
+                        {"text": "❌ Reject", "callback_data": f"admin_dep_reject_{order.id}" if order.id.startswith("TOPUP-") else f"admin_act_reject_{order.id}"}
+                    ]
+                ]
+            }
+            await bot.notify_admins(db, admin_text, reply_markup=admin_markup)
+        except Exception:
+            pass
+    return {"success": True, "status": order.status}
+
+
 @router.get("/pay_upi/{order_id}")
 async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
-    """Redirects mobile browsers directly to NPCI compliant upi://pay scheme with prefilled parameters."""
+    """Redirects mobile browsers directly to NPCI compliant upi://pay scheme with real-time status tracking."""
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         return HTMLResponse(content="<h2>Order not found or expired.</h2>", status_code=404)
@@ -1095,20 +1148,81 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Redirecting to UPI App...</title>
-    <script>
-        window.location.href = "{upi_uri}";
-    </script>
+    <title>UPI Payment — {order.id}</title>
+    <style>
+        body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 90vh; text-align: center; }}
+        .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 20px; padding: 32px 24px; max-width: 400px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }}
+        .badge {{ display: inline-block; padding: 6px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; margin-bottom: 16px; background: #0284c7; color: white; }}
+        .btn {{ display: block; width: 100%; box-sizing: border-box; background: #2563eb; color: white; text-decoration: none; padding: 14px 20px; border-radius: 12px; font-weight: 700; font-size: 16px; margin-top: 16px; border: none; cursor: pointer; transition: transform 0.1s; }}
+        .btn:active {{ transform: scale(0.98); }}
+        .btn-success {{ background: #16a34a; }}
+        .btn-secondary {{ background: #334155; color: #cbd5e1; margin-top: 10px; }}
+        .spinner {{ display: inline-block; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }}
+        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+    </style>
 </head>
-<body style="font-family: system-ui, -apple-system, sans-serif; text-align: center; padding: 40px; background: #0f172a; color: white;">
-    <h2 style="color: #38bdf8;">Opening GPay / PhonePe / Paytm...</h2>
-    <p style="font-size: 18px;">Payable Amount: <b style="color: #4ade80;">₹{pay_amt:.2f}</b></p>
-    <p style="font-size: 14px; color: #94a3b8;">Reference ID: <code>{order.id}</code></p>
-    <div style="margin-top: 30px;">
-        <a href="{upi_uri}" style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 12px; font-weight: bold; font-size: 16px;">
-            ⚡ Tap Here to Open UPI App
-        </a>
+<body>
+    <div class="card">
+        <div id="statusBadge" class="badge">⏳ Awaiting Payment...</div>
+        <h2 style="margin: 0 0 8px 0; color: #38bdf8;">Domino's Order Engine</h2>
+        <p style="margin: 0 0 20px 0; font-size: 14px; color: #94a3b8;">Ref ID: <code style="color: #cbd5e1;">{order.id}</code></p>
+        
+        <div style="font-size: 36px; font-weight: 800; color: #4ade80; margin-bottom: 24px;">₹{pay_amt:.2f}</div>
+        
+        <a href="{upi_uri}" class="btn">⚡ Open UPI App (GPay/PhonePe/Paytm)</a>
+        <button id="markPaidBtn" onclick="markPaid()" class="btn btn-secondary">✅ I Have Completed Payment</button>
+        
+        <p style="font-size: 12px; color: #64748b; margin-top: 20px; line-height: 1.5;">
+            Tapping the button opens GPay, PhonePe, or Paytm with amount ₹{pay_amt:.2f} & Ref {order.id} prefilled automatically.
+        </p>
     </div>
+
+    <script>
+        // Instant deep link trigger on mobile
+        window.location.href = "{upi_uri}";
+        
+        // Real-time Status Poller
+        async function checkStatus() {{
+            try {{
+                const res = await fetch('/api/pay_status/{order.id}');
+                if (res.ok) {{
+                    const data = await res.json();
+                    const badge = document.getElementById('statusBadge');
+                    if (data.completed) {{
+                        badge.style.background = '#16a34a';
+                        badge.innerHTML = '✅ Payment Confirmed & Verified!';
+                    }} else if (data.verified) {{
+                        badge.style.background = '#eab308';
+                        badge.style.color = '#000';
+                        badge.innerHTML = '<span class="spinner"></span> Verifying Transaction...';
+                    }} else if (data.cancelled) {{
+                        badge.style.background = '#dc2626';
+                        badge.innerHTML = '❌ Payment Request Cancelled';
+                    }}
+                }}
+            }} catch (e) {{}}
+        }}
+
+        async function markPaid() {{
+            const btn = document.getElementById('markPaidBtn');
+            btn.innerHTML = '<span class="spinner"></span> Submitting...';
+            btn.disabled = true;
+            try {{
+                const res = await fetch('/api/pay_mark_paid/{order.id}', {{ method: 'POST' }});
+                if (res.ok) {{
+                    btn.style.background = '#16a34a';
+                    btn.innerHTML = '✅ Submitted for Verification!';
+                    checkStatus();
+                }}
+            }} catch (e) {{
+                btn.disabled = false;
+                btn.innerHTML = '✅ I Have Completed Payment';
+            }}
+        }}
+
+        // Poll status every 2.5 seconds
+        setInterval(checkStatus, 2500);
+    </script>
 </body>
 </html>"""
     return HTMLResponse(content=html)
