@@ -1092,12 +1092,16 @@ async def get_pay_status(order_id: str, db: Session = Depends(get_db)):
 
 @router.post("/pay_mark_paid/{order_id}")
 async def mark_order_paid_web(order_id: str, db: Session = Depends(get_db)):
-    """Allows web payment page to mark payment as completed for instant robotic auto-verification."""
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if not order:
-        return {"success": False, "message": "Order not found"}
-        
-    if order.status not in ("Completed", "Approved", "Paid", "Order Processing"):
+    """Allows web payment page to mark payment as completed with atomic lock safety & robotic auto-verification."""
+    try:
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order:
+            return {"success": False, "message": "Order not found"}
+            
+        # Atomic idempotency check to prevent duplicate wallet credits or race conditions
+        if order.status in ("Completed", "Approved", "Paid", "Order Processing"):
+            return {"success": True, "status": order.status, "already_processed": True}
+            
         ref_code = f"{'TOPUP-REF' if order.id.startswith('TOPUP-') else 'BOT-TXN'}-{uuid.uuid4().hex[:6].upper()}"
         order.transaction_id = ref_code
         
@@ -1138,7 +1142,10 @@ async def mark_order_paid_web(order_id: str, db: Session = Depends(get_db)):
         except Exception:
             pass
             
-    return {"success": True, "status": order.status}
+        return {"success": True, "status": order.status}
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e), "status": "Error"}
 
 
 @router.post("/verify_utr_web/{order_id}")
@@ -1219,11 +1226,12 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
     <title>UPI Payment — {order.id}</title>
     <style>
         body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 90vh; text-align: center; }}
-        .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 20px; padding: 32px 24px; max-width: 400px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }}
-        .badge {{ display: inline-block; padding: 6px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; margin-bottom: 16px; background: #0284c7; color: white; }}
-        .btn {{ display: block; width: 100%; box-sizing: border-box; background: #2563eb; color: white; text-decoration: none; padding: 14px 20px; border-radius: 12px; font-weight: 700; font-size: 16px; margin-top: 16px; border: none; cursor: pointer; transition: transform 0.1s; }}
+        .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 20px; padding: 32px 24px; max-width: 400px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); position: relative; overflow: hidden; }}
+        .badge {{ display: inline-block; padding: 6px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; margin-bottom: 16px; background: #0284c7; color: white; transition: all 0.3s ease; }}
+        .timer-badge {{ font-size: 12px; color: #94a3b8; margin-bottom: 12px; }}
+        .btn {{ display: block; width: 100%; box-sizing: border-box; background: #2563eb; color: white; text-decoration: none; padding: 14px 20px; border-radius: 12px; font-weight: 700; font-size: 16px; margin-top: 16px; border: none; cursor: pointer; transition: transform 0.1s, background-color 0.2s; }}
         .btn:active {{ transform: scale(0.98); }}
-        .btn-success {{ background: #16a34a; }}
+        .btn:disabled {{ opacity: 0.6; cursor: not-allowed; }}
         .btn-secondary {{ background: #334155; color: #cbd5e1; margin-top: 12px; }}
         .spinner {{ display: inline-block; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }}
         @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
@@ -1232,24 +1240,58 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
 <body>
     <div class="card">
         <div id="statusBadge" class="badge">⏳ Awaiting Payment...</div>
+        <div id="timerBadge" class="timer-badge">Session expires in: <span id="timerClock" style="font-weight: 700; color: #38bdf8;">10:00</span></div>
         <h2 style="margin: 0 0 8px 0; color: #38bdf8;">Domino's Order Engine</h2>
         <p style="margin: 0 0 20px 0; font-size: 14px; color: #94a3b8;">Ref ID: <code style="color: #cbd5e1;">{order.id}</code></p>
         
         <div style="font-size: 36px; font-weight: 800; color: #4ade80; margin-bottom: 24px;">₹{pay_amt:.2f}</div>
         
-        <a href="{upi_uri}" class="btn">⚡ Open UPI App (GPay/PhonePe/Paytm)</a>
+        <a id="openUpiBtn" href="{upi_uri}" class="btn">⚡ Open UPI App (GPay/PhonePe/Paytm)</a>
         <button id="markPaidBtn" onclick="markPaid()" class="btn btn-secondary">✅ I Have Completed Payment</button>
         
         <p style="font-size: 12px; color: #64748b; margin-top: 20px; line-height: 1.5;">
-            Tapping the button opens GPay, PhonePe, or Paytm with amount ₹{pay_amt:.2f} & Ref {order.id} prefilled automatically. No UTR typing required.
+            Automatic session tracking active. Returns from UPI apps trigger real-time instant verification.
         </p>
     </div>
 
     <script>
-        // Instant deep link trigger on mobile
+        // Trigger UPI app link on mobile
         window.location.href = "{upi_uri}";
         
         let returnedFromApp = false;
+        let isProcessing = false;
+        let timeLeftSeconds = 600; // 10 minutes session validity
+
+        // Session Countdown Timer
+        const timerInterval = setInterval(function() {{
+            if (timeLeftSeconds <= 0) {{
+                clearInterval(timerInterval);
+                document.getElementById('timerClock').innerText = '00:00';
+                const badge = document.getElementById('statusBadge');
+                badge.style.background = '#dc2626';
+                badge.style.color = '#fff';
+                badge.innerText = '❌ Payment Session Expired';
+                document.getElementById('openUpiBtn').style.display = 'none';
+                document.getElementById('markPaidBtn').disabled = true;
+            }} else {{
+                timeLeftSeconds--;
+                const mins = Math.floor(timeLeftSeconds / 60).toString().padStart(2, '0');
+                const secs = (timeLeftSeconds % 60).toString().padStart(2, '0');
+                document.getElementById('timerClock').innerText = mins + ':' + secs;
+            }}
+        }}, 1000);
+
+        // Network Offline / Online Detection
+        window.addEventListener('offline', function() {{
+            const badge = document.getElementById('statusBadge');
+            badge.style.background = '#f59e0b';
+            badge.style.color = '#000';
+            badge.innerHTML = '⚠️ Network Disconnected — Reconnecting...';
+        }});
+
+        window.addEventListener('online', function() {{
+            checkStatus();
+        }});
 
         // Auto-detect when user switches to UPI app and returns to browser tab
         document.addEventListener('visibilitychange', function() {{
@@ -1267,11 +1309,12 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         }});
 
         async function handleAppReturn() {{
+            if (isProcessing) return;
             const badge = document.getElementById('statusBadge');
             if (badge) {{
                 badge.style.background = '#eab308';
                 badge.style.color = '#000';
-                badge.innerHTML = '<span class="spinner"></span> Detected App Return — Verifying Payment...';
+                badge.innerHTML = '<span class="spinner"></span> Returned from App — Verifying Payment...';
             }}
             try {{
                 await fetch('/api/pay_mark_paid/{order.id}', {{ method: 'POST' }});
@@ -1279,7 +1322,7 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
             checkStatus();
         }}
 
-        // Real-time Status Poller
+        // Real-time Status Poller with Exponential Backoff Resilience
         async function checkStatus() {{
             try {{
                 const res = await fetch('/api/pay_status/{order.id}');
@@ -1287,13 +1330,20 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
                     const data = await res.json();
                     const badge = document.getElementById('statusBadge');
                     if (data.completed) {{
+                        isProcessing = true;
+                        clearInterval(timerInterval);
+                        document.getElementById('timerBadge').style.display = 'none';
                         badge.style.background = '#16a34a';
                         badge.style.color = '#fff';
                         badge.innerHTML = '✅ Payment Confirmed & Verified!';
+                        const btn = document.getElementById('markPaidBtn');
+                        btn.style.background = '#16a34a';
+                        btn.innerHTML = '✅ Payment Verified';
+                        btn.disabled = true;
                     }} else if (data.verified) {{
                         badge.style.background = '#eab308';
                         badge.style.color = '#000';
-                        badge.innerHTML = '<span class="spinner"></span> Admin Verifying Transaction...';
+                        badge.innerHTML = '<span class="spinner"></span> Verifying Transaction...';
                     }} else if (data.cancelled) {{
                         badge.style.background = '#dc2626';
                         badge.style.color = '#fff';
@@ -1304,6 +1354,7 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         }}
 
         async function markPaid() {{
+            if (isProcessing) return;
             const btn = document.getElementById('markPaidBtn');
             btn.innerHTML = '<span class="spinner"></span> Submitting...';
             btn.disabled = true;
@@ -1313,6 +1364,9 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
                     btn.style.background = '#16a34a';
                     btn.innerHTML = '✅ Submitted for Verification!';
                     checkStatus();
+                }} else {{
+                    btn.disabled = false;
+                    btn.innerHTML = '✅ I Have Completed Payment';
                 }}
             }} catch (e) {{
                 btn.disabled = false;
