@@ -8,7 +8,7 @@ import traceback
 import hashlib
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Cookie, Response, Request, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from pydantic import BaseModel, Field
