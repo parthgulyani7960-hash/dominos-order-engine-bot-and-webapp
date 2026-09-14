@@ -1415,21 +1415,28 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
                         document.getElementById('timerBadge').style.display = 'none';
                         badge.style.background = '#16a34a';
                         badge.style.color = '#fff';
-                        badge.innerHTML = '✅ Payment Confirmed & Verified!';
+                        badge.innerHTML = '✅ Payment Confirmed & Approved!';
                         const btn = document.getElementById('markPaidBtn');
                         if (btn) {{
                             btn.style.background = '#16a34a';
-                            btn.innerHTML = '✅ Payment Verified';
+                            btn.innerHTML = '✅ Payment Approved & Credited';
                             btn.disabled = true;
                         }}
-                    }} else if (data.verified) {{
+                    }} else if (data.status === 'Pending Verification' || data.verified) {{
                         badge.style.background = '#eab308';
                         badge.style.color = '#000';
-                        badge.innerHTML = '<span class="spinner"></span> Verifying Transaction Credit...';
+                        badge.innerHTML = '⏳ Submitted — Awaiting Admin Approval...';
+                        const btn = document.getElementById('markPaidBtn');
+                        if (btn && !btn.disabled) {{
+                            btn.style.background = '#eab308';
+                            btn.style.color = '#000';
+                            btn.innerHTML = '⏳ Submitted for Verification';
+                            btn.disabled = true;
+                        }}
                     }} else if (data.cancelled) {{
                         badge.style.background = '#dc2626';
                         badge.style.color = '#fff';
-                        badge.innerHTML = '❌ Payment Request Cancelled';
+                        badge.innerHTML = '❌ Payment Request Rejected / Expired';
                     }}
                 }}
             }} catch (e) {{}}
