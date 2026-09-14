@@ -5793,6 +5793,74 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await answer_callback_query(callback_query_id)
         return
 
+    elif data == "menu_my_orders" or data.startswith("my_orders_page_"):
+        page = 1
+        if data.startswith("my_orders_page_"):
+            try:
+                page = int(data.replace("my_orders_page_", "").strip())
+            except ValueError:
+                page = 1
+        limit = 5
+        offset = (page - 1) * limit
+        
+        total_orders = db.query(Order).filter(Order.user_id == user.id).count()
+        total_pages = (total_orders + limit - 1) // limit if total_orders > 0 else 1
+        page = max(1, min(page, total_pages))
+        
+        user_orders = db.query(Order).filter(Order.user_id == user.id).order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
+        
+        msg = f"📦 <b>Your Orders History & Live Status</b>\n"
+        msg += f"<i>Page {page} of {total_pages} ({total_orders} total orders)</i>\n"
+        msg += f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        
+        if not user_orders:
+            msg += "<i>You haven't placed any orders yet.</i>\n\n"
+            msg += "🍕 Tap <b>View Menu</b> below to order delicious pizzas!"
+        else:
+            for o in user_orders:
+                _ist = (o.created_at + datetime.timedelta(hours=5, minutes=30)) if o.created_at else datetime.datetime.now()
+                date_str = _ist.strftime("%d %b %Y, %I:%M %p IST")
+                
+                status_icon = "⏳"
+                if o.status in ("Completed", "Paid", "Approved"):
+                    status_icon = "✅"
+                elif o.status in ("Order Processing", "Preparing"):
+                    status_icon = "🍕"
+                elif o.status in ("Out for Delivery", "Delivering"):
+                    status_icon = "🛵"
+                elif o.status in ("Cancelled", "Rejected", "Failed", "Expired"):
+                    status_icon = "❌"
+                    
+                items_str = ", ".join([f"{item.quantity}x {item.item_name or 'Pizza'}" for item in (o.items or [])]) or "Domino's Order"
+                if len(items_str) > 35:
+                    items_str = items_str[:32] + "..."
+                    
+                msg += (
+                    f"{status_icon} <b>Ref ID:</b> <code>{o.id}</code>\n"
+                    f"  🍕 <b>Items:</b> {escape_html(items_str)}\n"
+                    f"  💵 <b>Amount:</b> <b>₹{o.total_payable:.2f}</b>\n"
+                    f"  📊 <b>Status:</b> <b>{o.status}</b>\n"
+                    f"  🕒 <b>Date:</b> {date_str}\n\n"
+                )
+                
+        buttons = []
+        nav_row = []
+        if page > 1:
+            nav_row.append({"text": "⬅️ Prev", "callback_data": f"my_orders_page_{page-1}"})
+        if page < total_pages:
+            nav_row.append({"text": "Next ➡️", "callback_data": f"my_orders_page_{page+1}"})
+        if nav_row:
+            buttons.append(nav_row)
+            
+        buttons.append([
+            {"text": "🍕 Order Pizza Now", "callback_data": "menu_view"},
+            {"text": "💰 My Wallet", "callback_data": "wallet_view"}
+        ])
+        
+        await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
+        await answer_callback_query(callback_query_id)
+        return
+
     elif data.startswith("pay_now_"):
         order_id = data.replace("pay_now_", "").strip()
         order = db.query(Order).filter(Order.id == order_id).first()
