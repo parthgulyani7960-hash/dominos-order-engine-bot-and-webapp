@@ -4475,14 +4475,17 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         await display_pizza_menu(db, user, main_keyboard)
         return
 
-    elif text_lower == "💰 my wallet" or text.startswith("/wallet") or text.startswith("/balance"):
+    elif text_lower in ("💰 my wallet", "💳 my wallet", "my wallet", "/wallet", "/balance"):
         wallet_text, wallet_markup = render_wallet_view(db, user, offset=0, limit=5)
-        res = await send_bot_message(user.telegram_id, wallet_text, reply_markup=wallet_markup)
-        # Also edit in place if we have a last message to avoid spam
         last_msg_id = session.get("last_bot_msg_id")
         if last_msg_id:
-            await edit_bot_message(user.telegram_id, last_msg_id, wallet_text, reply_markup=wallet_markup)
+            edited = await edit_bot_message(user.telegram_id, last_msg_id, wallet_text, reply_markup=wallet_markup)
+            if not edited:
+                res = await send_bot_message(user.telegram_id, wallet_text, reply_markup=wallet_markup)
+                if isinstance(res, int):
+                    session["last_bot_msg_id"] = res
         else:
+            res = await send_bot_message(user.telegram_id, wallet_text, reply_markup=wallet_markup)
             if isinstance(res, int):
                 session["last_bot_msg_id"] = res
         return
@@ -8496,6 +8499,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             
         if order.status in ["Pending Verification", "Completed", "Approved", "Paid", "Order Processing"]:
             await answer_callback_query(callback_query_id, "⚠️ Payment verification already submitted & awaiting approval!", show_alert=True)
+            return
+
+        if order.status in ["Cancelled", "Rejected", "Failed"]:
+            await answer_callback_query(callback_query_id, f"⚠️ Request #{order.id} was already {order.status.lower()}!", show_alert=True)
             return
 
         # Check 10-minute QR validity window
