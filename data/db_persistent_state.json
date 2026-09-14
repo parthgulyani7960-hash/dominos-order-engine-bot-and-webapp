@@ -1,10 +1,10 @@
 {
   "version": 1.3,
-  "saved_at": "2026-09-14T20:18:31.957693+00:00",
+  "saved_at": "2026-09-14T20:23:06.641986+00:00",
   "users": [
     {
-      "id": "de0e3e23-fe13-47a7-ad18-5a0609da0522",
-      "telegram_id": "777666",
+      "id": "10edac8f-3fd4-4424-ac76-9a0481c8fb41",
+      "telegram_id": "111222",
       "username": "admin",
       "display_name": "Super Admin",
       "phone": null,
@@ -18,25 +18,25 @@
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-14T20:18:31.885448"
+      "created_at": "2026-09-14T20:23:04.957240"
     },
     {
-      "id": "893a24ee-a8a6-43a6-bfb7-ccf50fcbed2e",
-      "telegram_id": "666555",
-      "username": "testdeals",
-      "display_name": "Test Deals",
+      "id": "4ec2adeb-6131-4fd9-8daf-8705e8538445",
+      "telegram_id": "999917",
+      "username": "buyer17",
+      "display_name": "Buyer 17",
       "phone": null,
-      "city": "India",
+      "city": "Bangalore",
       "address": null,
-      "latitude": null,
-      "longitude": null,
-      "wallet_balance": 0.0,
+      "latitude": 12.9716,
+      "longitude": 77.5946,
+      "wallet_balance": 441.0,
       "is_admin": false,
       "is_blocked": false,
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-14T20:18:31.920264"
+      "created_at": "2026-09-14T20:23:04.999569"
     }
   ],
   "saved_addresses": [
@@ -1479,9 +1479,51 @@
       "longitude": 72.8464,
       "city": "Mumbai",
       "is_default": true
+    },
+    {
+      "id": "27763591-144c-4c35-8d2e-6039654d6635",
+      "user_id": "9c7bbb40-9cb2-47a2-872b-142be9221e08",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
     }
   ],
-  "orders": [],
+  "orders": [
+    {
+      "id": "PIZZA-E55526BB",
+      "user_id": "4ec2adeb-6131-4fd9-8daf-8705e8538445",
+      "original_total": 49.0,
+      "total_payable": 59.0,
+      "status": "Order Processing",
+      "payment_method": "wallet",
+      "address": "Store Area",
+      "phone": "+9199991717",
+      "latitude": 12.9716,
+      "longitude": 77.5946,
+      "delivery_instructions": null,
+      "dominos_reference": "DOM-REF-538653",
+      "wallet_applied": 0.0,
+      "upi_paid": 0.0,
+      "transaction_id": "TXN-3972C962745E",
+      "created_at": "2026-09-14T20:23:06.592328",
+      "items": [
+        {
+          "id": "6fe03aed-7f87-42b9-974e-b35b3e96952c",
+          "product_id": "b36577b0-03b0-40dd-8852-c412d748e7f0",
+          "item_key": null,
+          "item_name": "Classic Pizza Mania (Tomato)",
+          "item_details": null,
+          "quantity": 1,
+          "price": 49.0,
+          "crust": null,
+          "size": null
+        }
+      ]
+    }
+  ],
   "wallet_transactions": [],
   "coupons": [],
   "offers": [
