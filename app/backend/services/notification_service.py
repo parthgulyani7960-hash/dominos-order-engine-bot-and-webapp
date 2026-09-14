@@ -197,9 +197,13 @@ def _log_error(error_type: str, message: str):
     """Logs an error to the database without raising."""
     try:
         db = SessionLocal()
-        err = ErrorLog(type=error_type, message=message, stack_trace=traceback.format_exc())
-        db.add(err)
-        db.commit()
-        db.close()
+        try:
+            err = ErrorLog(type=error_type, message=message, stack_trace=traceback.format_exc())
+            db.add(err)
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
     except Exception:
         pass

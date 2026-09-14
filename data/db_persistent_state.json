@@ -1,9 +1,9 @@
 {
   "version": 1.3,
-  "saved_at": "2026-09-14T17:07:03.700425+00:00",
+  "saved_at": "2026-09-14T17:11:43.325460+00:00",
   "users": [
     {
-      "id": "8ff6559e-7279-4825-bb6e-aac5ab762a54",
+      "id": "75cbb8aa-d919-4937-ae46-3b7c30f87a01",
       "telegram_id": "777666",
       "username": "admin",
       "display_name": "Super Admin",
@@ -18,10 +18,10 @@
       "bot_state": null,
       "bot_cart": null,
       "telegram_verified": false,
-      "created_at": "2026-09-14T17:07:00.627707"
+      "created_at": "2026-09-14T17:11:39.983302"
     },
     {
-      "id": "664bf79a-1f5b-4323-a5ba-8466a1e8089d",
+      "id": "6084a941-e0bf-439b-9340-cdce14cec361",
       "telegram_id": "777888",
       "username": "stackeruser",
       "display_name": "Stacker User",
@@ -36,7 +36,7 @@
       "bot_state": "waiting_for_details",
       "bot_cart": "{\"offer_deal_1\": 1, \"offer_deal_2\": 1}",
       "telegram_verified": false,
-      "created_at": "2026-09-14T17:07:00.667644"
+      "created_at": "2026-09-14T17:11:40.023188"
     }
   ],
   "saved_addresses": [
@@ -849,6 +849,26 @@
       "longitude": 72.8777,
       "city": "Mumbai",
       "is_default": true
+    },
+    {
+      "id": "9d5b2f1d-c0a0-46c8-8863-6b2a5422023c",
+      "user_id": "7455bf49-2530-4c3e-8e03-5bfc4f032d9d",
+      "label": "Home",
+      "full_address": "Flat 402, Sunshine Apartments, MG Road, Andheri West",
+      "latitude": 19.1197,
+      "longitude": 72.8464,
+      "city": "Mumbai",
+      "is_default": true
+    },
+    {
+      "id": "8023939d-27d2-4bc4-91f3-b45abd1b4953",
+      "user_id": "6084a941-e0bf-439b-9340-cdce14cec361",
+      "label": "Home",
+      "full_address": "Mumbai",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "city": "Mumbai",
+      "is_default": true
     }
   ],
   "orders": [],
@@ -960,7 +980,7 @@
       "items_json": "[{\"name\": \"Margherita\", \"size\": \"Regular\", \"qty\": 2}]"
     },
     {
-      "id": "01dc5cb9-16c7-4f79-a3b8-50d922c00113",
+      "id": "fab4bff8-f214-4784-b6f1-6f7366911842",
       "offer_key": "deal_bot_edit_test",
       "title": "Bot Edit Test Deal",
       "badge": "\ud83d\udd25 50% OFF",
@@ -973,7 +993,7 @@
       "items_json": null
     },
     {
-      "id": "1f75e1d8-ef89-4764-9f1c-435767945e1b",
+      "id": "febb97ac-5c54-4b36-abf6-79807721133a",
       "offer_key": "deal_rich_combo",
       "title": "Party Fiesta Combo",
       "badge": "\u26a1 50% OFF",
