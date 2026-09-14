@@ -1176,13 +1176,12 @@ async def verify_utr_web(order_id: str, payload: dict, db: Session = Depends(get
         await bot.notify_admins(db, admin_text, reply_markup=admin_markup)
     except Exception:
         pass
-
-    return {"success": True, "status": order.status, "message": "UTR verified & submitted for admin approval!"}
+    return {"success": True, "status": order.status}
 
 
 @router.get("/pay_upi/{order_id}")
 async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
-    """Redirects mobile browsers directly to NPCI compliant upi://pay scheme with real-time status tracking and 12-digit UTR input."""
+    """Redirects mobile browsers directly to NPCI compliant upi://pay scheme with instant 1-tap automatic verification and real-time status tracking."""
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         return HTMLResponse(content="<h2>Order not found or expired.</h2>", status_code=404)
@@ -1209,10 +1208,8 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         .badge {{ display: inline-block; padding: 6px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; margin-bottom: 16px; background: #0284c7; color: white; }}
         .btn {{ display: block; width: 100%; box-sizing: border-box; background: #2563eb; color: white; text-decoration: none; padding: 14px 20px; border-radius: 12px; font-weight: 700; font-size: 16px; margin-top: 16px; border: none; cursor: pointer; transition: transform 0.1s; }}
         .btn:active {{ transform: scale(0.98); }}
-        .btn-secondary {{ background: #334155; color: #cbd5e1; margin-top: 10px; }}
-        .input-box {{ width: 100%; box-sizing: border-box; padding: 12px 16px; border-radius: 10px; border: 1px solid #475569; background: #0f172a; color: #f8fafc; font-size: 15px; font-family: monospace; text-align: center; margin-top: 14px; letter-spacing: 2px; }}
-        .input-box:focus {{ outline: none; border-color: #38bdf8; }}
-        .error-text {{ color: #f87171; font-size: 13px; margin-top: 8px; display: none; }}
+        .btn-success {{ background: #16a34a; }}
+        .btn-secondary {{ background: #334155; color: #cbd5e1; margin-top: 12px; }}
         .spinner {{ display: inline-block; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }}
         @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
     </style>
@@ -1226,18 +1223,10 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         <div style="font-size: 36px; font-weight: 800; color: #4ade80; margin-bottom: 24px;">₹{pay_amt:.2f}</div>
         
         <a href="{upi_uri}" class="btn">⚡ Open UPI App (GPay/PhonePe/Paytm)</a>
-        
-        <div style="margin-top: 20px; border-top: 1px solid #334155; padding-top: 16px;">
-            <p style="font-size: 13px; color: #94a3b8; margin: 0 0 8px 0;">Enter 12-Digit Bank UTR / Ref No.:</p>
-            <input type="text" id="utrInput" class="input-box" placeholder="e.g. 426635891234" maxlength="12" inputmode="numeric">
-            <div id="utrErr" class="error-text"></div>
-            <button id="verifyUtrBtn" onclick="submitUTR()" class="btn btn-secondary">🔍 Verify 12-Digit UTR</button>
-        </div>
-
-        <button id="markPaidBtn" onclick="markPaid()" class="btn btn-secondary" style="margin-top: 10px;">✅ I Have Completed Payment</button>
+        <button id="markPaidBtn" onclick="markPaid()" class="btn btn-secondary">✅ I Have Completed Payment</button>
         
         <p style="font-size: 12px; color: #64748b; margin-top: 20px; line-height: 1.5;">
-            Tapping the button opens GPay, PhonePe, or Paytm with amount ₹{pay_amt:.2f} & Ref {order.id} prefilled automatically.
+            Tapping the button opens GPay, PhonePe, or Paytm with amount ₹{pay_amt:.2f} & Ref {order.id} prefilled automatically. No UTR typing required.
         </p>
     </div>
 
@@ -1245,7 +1234,7 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         // Instant deep link trigger on mobile
         window.location.href = "{upi_uri}";
         
-        // Real-time Status Poller
+        # Real-time Status Poller
         async function checkStatus() {{
             try {{
                 const res = await fetch('/api/pay_status/{order.id}');
@@ -1265,46 +1254,6 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
                     }}
                 }}
             }} catch (e) {{}}
-        }}
-
-        async function submitUTR() {{
-            const input = document.getElementById('utrInput');
-            const errDiv = document.getElementById('utrErr');
-            const btn = document.getElementById('verifyUtrBtn');
-            const val = input.value.trim();
-            errDiv.style.display = 'none';
-
-            if (val.length !== 12 || !/^\d+$/.test(val)) {{
-                errDiv.innerText = '❌ Must be exactly 12 numeric digits.';
-                errDiv.style.display = 'block';
-                return;
-            }}
-
-            btn.innerHTML = '<span class="spinner"></span> Verifying UTR...';
-            btn.disabled = true;
-            try {{
-                const res = await fetch('/api/verify_utr_web/{order.id}', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ utr: val }})
-                }});
-                const data = await res.json();
-                if (res.ok && data.success) {{
-                    btn.style.background = '#16a34a';
-                    btn.innerHTML = '✅ UTR Submitted Successfully!';
-                    checkStatus();
-                }} else {{
-                    btn.disabled = false;
-                    btn.innerHTML = '🔍 Verify 12-Digit UTR';
-                    errDiv.innerText = '⚠️ ' + (data.detail || 'UTR Verification failed');
-                    errDiv.style.display = 'block';
-                }}
-            }} catch (e) {{
-                btn.disabled = false;
-                btn.innerHTML = '🔍 Verify 12-Digit UTR';
-                errDiv.innerText = '⚠️ Network error during verification.';
-                errDiv.style.display = 'block';
-            }}
         }}
 
         async function markPaid() {{
