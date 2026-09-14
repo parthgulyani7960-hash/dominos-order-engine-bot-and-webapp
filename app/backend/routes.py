@@ -21,7 +21,7 @@ from .auth import (
     verify_telegram_init_data, create_access_token, create_refresh_token,
     verify_token, hash_password, verify_password, ACCESS_TOKEN_EXPIRE_MINUTES
 )
-from .bot import send_bot_message, send_bot_photo, get_order_progress_bar, reverse_geocode
+from .bot import send_bot_message, send_bot_photo, get_order_progress_bar, reverse_geocode, notify_admins
 from .utils import encrypt_data, decrypt_data, parse_gift_card_file, api_rate_limiter, strict_rate_limiter, generate_upi_qr_details, escape_html
 
 router = APIRouter()
@@ -1130,7 +1130,7 @@ async def mark_order_paid_web(order_id: str, db: Session = Depends(get_db)):
                         ]
                     ]
                 }
-                await bot.send_bot_message(order.user.telegram_id, user_msg, reply_markup=user_markup)
+                await send_bot_message(order.user.telegram_id, user_msg, reply_markup=user_markup)
         except Exception as e:
             logger.error(f"Error notifying user on payment submission: {e}")
 
@@ -1153,7 +1153,7 @@ async def mark_order_paid_web(order_id: str, db: Session = Depends(get_db)):
                     ]
                 ]
             }
-            await bot.notify_admins(db, admin_text, reply_markup=admin_markup)
+            await notify_admins(db, admin_text, reply_markup=admin_markup)
         except Exception as e:
             logger.error(f"Error notifying admins on payment submission: {e}")
             
