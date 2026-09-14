@@ -9138,7 +9138,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         import base64 as _b64
         if qr_data_url and qr_data_url.startswith("data:image/png;base64,"):
             qr_bytes = _b64.b64decode(qr_data_url.split(",", 1)[1])
-            await send_bot_photo_bytes(user.telegram_id, qr_bytes, f"UPI_QR_{order.id}.png", caption)
+            await send_bot_document(user.telegram_id, qr_bytes, f"UPI_Payment_QR_{order.id}.png", caption)
         else:
             await send_bot_photo(user.telegram_id, upi_details["qr_code_url"], caption)
 
