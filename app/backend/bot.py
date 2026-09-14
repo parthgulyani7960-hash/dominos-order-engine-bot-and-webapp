@@ -1643,7 +1643,8 @@ def render_admin_command_center(db: Session) -> tuple[str, dict]:
                 {"text": "📊 Reports & Backup", "callback_data": "admin_reports_menu"}
             ],
             [
-                {"text": "⚠️ View Error Logs", "callback_data": "admin_view_error_logs"}
+                {"text": "⚠️ View Error Logs", "callback_data": "admin_view_error_logs"},
+                {"text": "🗑️ Clear Database (Main Admin)", "callback_data": "admin_clear_db_confirm"}
             ]
         ]
     }
@@ -6331,6 +6332,89 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         admin_dashboard_text, admin_inline_markup = render_admin_command_center(db)
         await edit_bot_message(user.telegram_id, message_id, admin_dashboard_text, reply_markup=admin_inline_markup)
         await answer_callback_query(callback_query_id, "Stats Refreshed!")
+        return
+
+    elif data == "admin_clear_db_confirm":
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        
+        main_admin_id = os.getenv("ADMIN_TELEGRAM_ID", "7958236048").strip()
+        if str(user.telegram_id).strip() != str(main_admin_id).strip():
+            await answer_callback_query(
+                callback_query_id,
+                "⚠️ Only the Primary Main Admin can clear the database!",
+                show_alert=True
+            )
+            return
+
+        confirm_text = (
+            "⚠️ <b>DANGER ZONE: Clear Platform Database</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Are you sure you want to clear/reset non-admin records in the platform database?\n\n"
+            "• <b>What will be cleared:</b> All orders, wallet transactions, saved addresses, support tickets, and non-admin user records.\n"
+            "• <b>What will be preserved:</b> Admin accounts & system configuration settings.\n\n"
+            "<i>A persistent JSON backup snapshot will be saved prior to resetting. This action cannot be undone!</i>"
+        )
+        confirm_markup = {
+            "inline_keyboard": [
+                [{"text": "🚨 YES, CLEAR DATABASE NOW", "callback_data": "admin_clear_db_execute"}],
+                [{"text": "❌ Cancel & Return to Command Center", "callback_data": "admin_refresh_stats"}]
+            ]
+        }
+        await edit_bot_message(user.telegram_id, message_id, confirm_text, reply_markup=confirm_markup)
+        await answer_callback_query(callback_query_id)
+        return
+
+    elif data == "admin_clear_db_execute":
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        
+        main_admin_id = os.getenv("ADMIN_TELEGRAM_ID", "7958236048").strip()
+        if str(user.telegram_id).strip() != str(main_admin_id).strip():
+            await answer_callback_query(
+                callback_query_id,
+                "⚠️ Only the Primary Main Admin can execute database clear!",
+                show_alert=True
+            )
+            return
+
+        # Perform snapshot backup first
+        try:
+            run_backup(db)
+        except Exception:
+            pass
+
+        # Clear non-admin tables
+        try:
+            db.query(OrderNote).delete(synchronize_session=False)
+            db.query(OrderStatusHistory).delete(synchronize_session=False)
+            db.query(OrderItem).delete(synchronize_session=False)
+            db.query(UTRAttempt).delete(synchronize_session=False)
+            db.query(QRGenerationHistory).delete(synchronize_session=False)
+            db.query(RiderAssignment).delete(synchronize_session=False)
+            db.query(WalletTransaction).delete(synchronize_session=False)
+            db.query(WithdrawalRequest).delete(synchronize_session=False)
+            db.query(SavedAddress).delete(synchronize_session=False)
+            db.query(Order).delete(synchronize_session=False)
+            db.query(SupportMessage).delete(synchronize_session=False)
+            
+            # Delete non-admin users
+            db.query(User).filter(User.telegram_id != str(main_admin_id)).delete(synchronize_session=False)
+            db.commit()
+            
+            # Save empty persistent DB snapshot to Firebase & disk
+            auto_save_persistent_db_state(db)
+            
+            await answer_callback_query(callback_query_id, "✅ Database reset successfully!", show_alert=True)
+        except Exception as e:
+            db.rollback()
+            await answer_callback_query(callback_query_id, f"❌ Database reset failed: {e}", show_alert=True)
+            return
+
+        admin_dashboard_text, admin_inline_markup = render_admin_command_center(db)
+        await edit_bot_message(user.telegram_id, message_id, "✅ <b>Database cleared and reset successfully!</b>\n\n" + admin_dashboard_text, reply_markup=admin_inline_markup)
         return
 
     elif data == "admin_sys_config":
