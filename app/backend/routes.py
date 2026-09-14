@@ -1279,14 +1279,16 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
     
     pay_amt = order.total_payable
     note_str = f"Deposit {order.id}" if order.id.startswith("TOPUP-") else f"Order {order.id}"
-    upi_details = generate_upi_qr_details(upi_id, upi_name, pay_amt, order.id, note_str)
-    upi_uri = upi_details["upi_uri"]
-    qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote_plus(upi_uri)}"
     
-    # Specific UPI App URI schemes
-    phonepe_uri = upi_uri.replace("upi://pay", "phonepe://pay")
-    paytm_uri = upi_uri.replace("upi://pay", "paytmmp://pay")
-    gpay_uri = upi_uri
+    encoded_name = urllib.parse.quote(upi_name)
+    encoded_note = urllib.parse.quote(note_str)
+    
+    upi_uri = f"upi://pay?pa={upi_id}&pn={encoded_name}&am={pay_amt:.2f}&tr={order.id}&tn={encoded_note}&cu=INR"
+    phonepe_intent = f"intent://pay?pa={upi_id}&pn={encoded_name}&am={pay_amt:.2f}&tr={order.id}&tn={encoded_note}&cu=INR#Intent;scheme=upi;package=com.phonepe.app;end"
+    gpay_intent = f"intent://pay?pa={upi_id}&pn={encoded_name}&am={pay_amt:.2f}&tr={order.id}&tn={encoded_note}&cu=INR#Intent;scheme=upi;package=com.google.android.apps.nbu.paisa.user;end"
+    paytm_intent = f"intent://pay?pa={upi_id}&pn={encoded_name}&am={pay_amt:.2f}&tr={order.id}&tn={encoded_note}&cu=INR#Intent;scheme=upi;package=net.one97.paytm;end"
+    
+    qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote_plus(upi_uri)}"
     
     html = f"""<!DOCTYPE html>
 <html>
@@ -1337,10 +1339,10 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
             <span style="font-size: 12px; background: #2563eb; color: white; padding: 2px 8px; border-radius: 6px;">Copy</span>
         </div>
         
-        <!-- App Specific Launch Buttons -->
-        <a id="phonepeBtn" href="{phonepe_uri}" class="btn btn-phonepe">🟣 Pay via PhonePe</a>
-        <a id="gpayBtn" href="{gpay_uri}" class="btn btn-gpay">🔵 Pay via Google Pay</a>
-        <a id="paytmBtn" href="{paytm_uri}" class="btn btn-paytm">🔷 Pay via Paytm</a>
+        <!-- App Specific Launch Buttons (Android Intent URIs & iOS Adapted) -->
+        <a id="phonepeBtn" href="{phonepe_intent}" class="btn btn-phonepe">🟣 Pay via PhonePe</a>
+        <a id="gpayBtn" href="{gpay_intent}" class="btn btn-gpay">🔵 Pay via Google Pay</a>
+        <a id="paytmBtn" href="{paytm_intent}" class="btn btn-paytm">🔷 Pay via Paytm</a>
         <a id="openUpiBtn" href="{upi_uri}" class="btn btn-secondary">⚡ Pay via Any UPI App</a>
         
         <button id="newPayBtn" onclick="generateNewPaymentLink()" class="btn btn-action" style="display: none;">➕ Generate New Payment Link</button>
@@ -1354,6 +1356,13 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
     <div id="toast" class="toast">Copied UPI ID!</div>
 
     <script>
+        // Adapt URLs for iOS devices
+        const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (isIOS) {{
+            document.getElementById('phonepeBtn').href = "phonepe://pay?pa={upi_id}&pn={encoded_name}&am={pay_amt:.2f}&tr={order.id}&tn={encoded_note}&cu=INR";
+            document.getElementById('gpayBtn').href = "{upi_uri}";
+            document.getElementById('paytmBtn').href = "paytmmp://pay?pa={upi_id}&pn={encoded_name}&am={pay_amt:.2f}&tr={order.id}&tn={encoded_note}&cu=INR";
+        }}
         let isProcessing = false;
         let timeLeftSeconds = 600;
 
