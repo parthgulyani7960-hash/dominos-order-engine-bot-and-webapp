@@ -106,7 +106,7 @@ class Settings(BaseSettings):
     # --- Admin / bot ---
     ADMIN_TELEGRAM_ID: str = Field("", description="Telegram ID of the primary admin user.")
     TELEGRAM_BOT_TOKEN: str = Field("", description="Telegram Bot API token.")
-    MINI_APP_URL: str = Field("http://localhost:8000", description="Public URL of the mini-app.")
+    MINI_APP_URL: str = Field("https://dominos-order-engine-bot-and-webapp-1.onrender.com", description="Public URL of the mini-app.")
 
     if _PYDANTIC_V2:
         model_config = {

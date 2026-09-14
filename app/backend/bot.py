@@ -137,7 +137,7 @@ def load_env_file():
 load_env_file()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-MINI_APP_URL = os.getenv("MINI_APP_URL", "http://localhost:8000")
+MINI_APP_URL = os.getenv("MINI_APP_URL", "https://dominos-order-engine-bot-and-webapp-1.onrender.com")
 
 # Reference to the SSE broadcast callback (injected by main.py)
 sse_broadcast_callback = None
@@ -1213,7 +1213,7 @@ def get_mini_app_url(db: Session = None) -> str:
         finally:
             if close_db:
                 db.close()
-    return _MINI_APP_URL_CACHE if _MINI_APP_URL_CACHE is not None else os.getenv("MINI_APP_URL", "http://localhost:8000")
+    return _MINI_APP_URL_CACHE if _MINI_APP_URL_CACHE is not None else os.getenv("MINI_APP_URL", "https://dominos-order-engine-bot-and-webapp-1.onrender.com")
 
 _BOT_FEE_CACHE = None
 _BOT_FEE_LAST_UPDATE = 0
@@ -8425,7 +8425,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             f"After completing payment, tap <b>✅ I Have Paid</b> below to submit your request for admin verification."
         )
         
-        base_domain = os.getenv("MINI_APP_URL", "https://dominos-order-engine-bot-and-webapp-1.onrender.com").rstrip('/')
+        base_domain = get_mini_app_url(db).rstrip('/')
         pay_link = f"{base_domain}/api/pay_upi/{order_id}"
         payment_markup = {
             "inline_keyboard": [
@@ -9441,7 +9441,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 f"<i>Tapping the link opens your phone's UPI app with amount ₹{pay_amount:.2f} & Ref <code>{order_id}</code> prefilled automatically!</i>\n\n"
                 f"After completing transfer, tap <b>✅ I Have Paid / Verify Payment</b> below. Our admin team will verify and dispatch your order immediately! 🍕"
             )
-            base_domain = os.getenv("MINI_APP_URL", "https://dominos-order-engine-bot-and-webapp-1.onrender.com").rstrip('/')
+            base_domain = get_mini_app_url(db).rstrip('/')
             pay_link = f"{base_domain}/api/pay_upi/{order_id}"
             pending_markup = {
                 "inline_keyboard": [
