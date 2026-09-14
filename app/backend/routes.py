@@ -1240,6 +1240,30 @@ async def verify_utr_web(order_id: str, payload: dict, db: Session = Depends(get
     return {"success": True, "status": order.status}
 
 
+@router.post("/pay_new/{order_id}")
+async def generate_new_payment_session(order_id: str, db: Session = Depends(get_db)):
+    """Generates a fresh new payment transaction session when a previous session expires or is cancelled."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        return JSONResponse(status_code=404, content={"success": False, "detail": "Order not found"})
+        
+    # Expire old order if still pending
+    if order.status in ("Pending Verification", "Awaiting Payment"):
+        order.status = "Expired"
+        
+    new_id = f"TOPUP-{uuid.uuid4().hex[:6].upper()}" if order.id.startswith("TOPUP-") else f"ORD-{uuid.uuid4().hex[:6].upper()}"
+    new_order = Order(
+        id=new_id,
+        user_id=order.user_id,
+        total_payable=order.total_payable,
+        status="Pending Verification"
+    )
+    db.add(new_order)
+    db.commit()
+    auto_save_persistent_db_state(db)
+    return {"success": True, "new_order_id": new_id, "new_pay_url": f"/api/pay_upi/{new_id}"}
+
+
 @router.get("/pay_upi/{order_id}")
 async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
     """Redirects mobile browsers directly to NPCI compliant upi://pay scheme with instant 1-tap automatic verification and real-time status tracking."""
@@ -1272,7 +1296,7 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         .btn:active {{ transform: scale(0.98); }}
         .btn:disabled {{ opacity: 0.6; cursor: not-allowed; }}
         .btn-secondary {{ background: #334155; color: #cbd5e1; margin-top: 12px; }}
-        .btn-warning {{ background: #eab308; color: #000; font-weight: 800; }}
+        .btn-action {{ background: #0284c7; color: #fff; font-weight: 800; margin-top: 12px; }}
         .spinner {{ display: inline-block; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }}
         @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
     </style>
@@ -1288,7 +1312,7 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         
         <a id="openUpiBtn" href="{upi_uri}" class="btn">⚡ Open UPI App (GPay/PhonePe/Paytm)</a>
         <button id="markPaidBtn" onclick="markPaid()" class="btn btn-secondary">✅ I Have Completed Payment</button>
-        <button id="retryBtn" onclick="retryPayment()" class="btn btn-warning" style="display: none; margin-top: 12px;">🔄 Retry Payment Link</button>
+        <button id="newPayBtn" onclick="generateNewPaymentLink()" class="btn btn-action" style="display: none;">➕ Generate New Payment Link</button>
         <a id="supportBtn" href="https://t.me/DominoOrderEngineSupportBot?text=Report+Payment+Issue+Ref+{order.id}" target="_blank" class="btn btn-secondary" style="margin-top: 10px; font-size: 14px;">💬 Contact Support / Report Issue</a>
         
         <p style="font-size: 12px; color: #64748b; margin-top: 20px; line-height: 1.5;">
@@ -1304,18 +1328,21 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         let isProcessing = false;
         let timeLeftSeconds = 600; // 10 minutes session validity
 
-        function retryPayment() {{
-            timeLeftSeconds = 600;
-            isProcessing = false;
-            document.getElementById('timerClock').innerText = '10:00';
-            const badge = document.getElementById('statusBadge');
-            badge.style.background = '#0284c7';
-            badge.style.color = '#fff';
-            badge.innerText = '⏳ Awaiting Payment...';
-            document.getElementById('openUpiBtn').style.display = 'block';
-            document.getElementById('markPaidBtn').disabled = false;
-            document.getElementById('retryBtn').style.display = 'none';
-            window.location.href = "{upi_uri}";
+        async function generateNewPaymentLink() {{
+            const btn = document.getElementById('newPayBtn');
+            btn.innerHTML = '<span class="spinner"></span> Generating New Link...';
+            btn.disabled = true;
+            try {{
+                const res = await fetch('/api/pay_new/{order.id}', {{ method: 'POST' }});
+                if (res.ok) {{
+                    const data = await res.json();
+                    if (data.new_pay_url) {{
+                        window.location.href = data.new_pay_url;
+                        return;
+                    }}
+                }}
+            }} catch (e) {{}}
+            window.location.reload();
         }}
 
         // Session Countdown Timer
@@ -1329,7 +1356,7 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
                 badge.innerText = '❌ Payment Session Expired';
                 document.getElementById('openUpiBtn').style.display = 'none';
                 document.getElementById('markPaidBtn').disabled = true;
-                document.getElementById('retryBtn').style.display = 'block';
+                document.getElementById('newPayBtn').style.display = 'block';
             }} else {{
                 timeLeftSeconds--;
                 const mins = Math.floor(timeLeftSeconds / 60).toString().padStart(2, '0');
