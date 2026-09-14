@@ -1234,7 +1234,37 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
         // Instant deep link trigger on mobile
         window.location.href = "{upi_uri}";
         
-        # Real-time Status Poller
+        let returnedFromApp = false;
+
+        // Auto-detect when user switches to UPI app and returns to browser tab
+        document.addEventListener('visibilitychange', function() {{
+            if (document.visibilityState === 'hidden') {{
+                returnedFromApp = true;
+            }} else if (document.visibilityState === 'visible' && returnedFromApp) {{
+                handleAppReturn();
+            }}
+        }});
+        
+        window.addEventListener('focus', function() {{
+            if (returnedFromApp) {{
+                handleAppReturn();
+            }}
+        }});
+
+        async function handleAppReturn() {{
+            const badge = document.getElementById('statusBadge');
+            if (badge) {{
+                badge.style.background = '#eab308';
+                badge.style.color = '#000';
+                badge.innerHTML = '<span class="spinner"></span> Detected App Return — Verifying Payment...';
+            }}
+            try {{
+                await fetch('/api/pay_mark_paid/{order.id}', {{ method: 'POST' }});
+            }} catch (e) {{}}
+            checkStatus();
+        }}
+
+        // Real-time Status Poller
         async function checkStatus() {{
             try {{
                 const res = await fetch('/api/pay_status/{order.id}');
@@ -1243,13 +1273,15 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
                     const badge = document.getElementById('statusBadge');
                     if (data.completed) {{
                         badge.style.background = '#16a34a';
+                        badge.style.color = '#fff';
                         badge.innerHTML = '✅ Payment Confirmed & Verified!';
                     }} else if (data.verified) {{
                         badge.style.background = '#eab308';
                         badge.style.color = '#000';
-                        badge.innerHTML = '<span class="spinner"></span> Verifying Transaction...';
+                        badge.innerHTML = '<span class="spinner"></span> Admin Verifying Transaction...';
                     }} else if (data.cancelled) {{
                         badge.style.background = '#dc2626';
+                        badge.style.color = '#fff';
                         badge.innerHTML = '❌ Payment Request Cancelled';
                     }}
                 }}
@@ -1273,8 +1305,8 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
             }}
         }}
 
-        // Poll status every 2.5 seconds
-        setInterval(checkStatus, 2500);
+        // Poll status every 2 seconds
+        setInterval(checkStatus, 2000);
     </script>
 </body>
 </html>"""
