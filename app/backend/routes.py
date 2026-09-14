@@ -1092,37 +1092,52 @@ async def get_pay_status(order_id: str, db: Session = Depends(get_db)):
 
 @router.post("/pay_mark_paid/{order_id}")
 async def mark_order_paid_web(order_id: str, db: Session = Depends(get_db)):
-    """Allows web payment page to mark payment as completed for verification."""
+    """Allows web payment page to mark payment as completed for instant robotic auto-verification."""
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         return {"success": False, "message": "Order not found"}
-    if order.status not in ("Pending Verification", "Completed", "Approved", "Paid", "Order Processing"):
-        order.status = "Pending Verification"
+        
+    if order.status not in ("Completed", "Approved", "Paid", "Order Processing"):
         ref_code = f"{'TOPUP-REF' if order.id.startswith('TOPUP-') else 'BOT-TXN'}-{uuid.uuid4().hex[:6].upper()}"
         order.transaction_id = ref_code
+        
+        if order.id.startswith("TOPUP-"):
+            order.status = "Completed"
+            if order.user:
+                order.user.wallet_balance += order.total_payable
+                from .database import WalletTransaction, OrderStatusHistory
+                tx = WalletTransaction(
+                    user_id=order.user.id,
+                    type="deposit",
+                    amount=order.total_payable,
+                    description=f"Robotic Auto-Approved Deposit ({ref_code})"
+                )
+                db.add(tx)
+                h = OrderStatusHistory(order_id=order.id, status="Completed")
+                db.add(h)
+        else:
+            order.status = "Paid"
+            from .database import OrderStatusHistory
+            h = OrderStatusHistory(order_id=order.id, status="Paid")
+            db.add(h)
+            
         db.commit()
         auto_save_persistent_db_state(db)
         
-        # Notify admins
+        # Notify admins for audit & history report
         try:
             admin_text = (
-                f"📥 <b>New Payment Verification Request (via Web Redirect)</b>\n"
+                f"⚡ <b>Payment Auto-Approved (Robotic Verification)</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🆔 <b>Ref ID:</b> <code>{order.id}</code>\n"
                 f"💵 <b>Amount:</b> ₹{order.total_payable:.2f}\n"
-                f"🔢 <b>Reference Token:</b> <code>{ref_code}</code>"
+                f"🔢 <b>Reference Token:</b> <code>{ref_code}</code>\n"
+                f"✅ <b>Status:</b> Auto-Completed & Logged to History"
             )
-            admin_markup = {
-                "inline_keyboard": [
-                    [
-                        {"text": "✅ Approve Deposit/Order", "callback_data": f"admin_dep_approve_{order.id}" if order.id.startswith("TOPUP-") else f"admin_act_approve_{order.id}"},
-                        {"text": "❌ Reject", "callback_data": f"admin_dep_reject_{order.id}" if order.id.startswith("TOPUP-") else f"admin_act_reject_{order.id}"}
-                    ]
-                ]
-            }
-            await bot.notify_admins(db, admin_text, reply_markup=admin_markup)
+            await bot.notify_admins(db, admin_text)
         except Exception:
             pass
+            
     return {"success": True, "status": order.status}
 
 
