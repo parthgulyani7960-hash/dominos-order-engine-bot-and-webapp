@@ -648,12 +648,6 @@ async def get_dominos_menu(lat: float, lon: float, page: int = 1, limit: int = 1
     browser = DominosBrowser()
     store = await browser.find_nearest_store(lat, lon, db)
     menu = await browser.fetch_menu(store["store_id"], page=page, limit=limit, db=db)
-    # Broadcast menu update (optional)
-    try:
-        from .main import ws_manager
-        await ws_manager.broadcast_all({"type": "menu_update", "store_id": store["store_id"], "menu": menu, "page": page})
-    except Exception:
-        pass
     return {"store": store, "menu": menu, "page": page, "limit": limit}
 
 @router.get("/orders/my-orders")
@@ -943,7 +937,8 @@ async def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)
                 "service_charge": service_charge,
                 "total": total_payable
             }
-        }    # 4. Order Processing Flow (Directly move to Order Processing, no gift cards allocated)
+        }
+    # 4. Order Processing Flow (Directly move to Order Processing, no gift cards allocated)
     order.status = "Order Processing"
     h2 = OrderStatusHistory(order_id=order.id, status="Order Processing")
     db.add(h2)
@@ -1279,12 +1274,6 @@ async def place_dominos_order(payload: dict, db: Session = Depends(get_db), user
         "receiver": payload["receiver"],
         "payment_method": payload["payment_method"]
     }, db)
-    # Notify user via WebSocket
-    try:
-        from .main import ws_manager
-        await ws_manager.send_to_user(user.id, {"type": "order_placed", "result": order_result})
-    except Exception as e:
-        logger.error(f"WebSocket order notify failed: {e}")
     return order_result
 
 
@@ -3421,25 +3410,31 @@ def get_order_pdf(order_id: str, db: Session = Depends(get_db), admin: User = De
     class ReceiptPDF(FPDF):
         def header(self):
             # Header banner
-            self.set_fill_color(255, 71, 87)
-            self.rect(0, 0, 210, 25, "F")
-            self.set_y(5)
-            self.set_font("Helvetica", "B", 14)
+            self.set_fill_color(227, 24, 55)  # Domino's Red
+            self.rect(0, 0, 210, 30, "F")
+            self.set_y(8)
+            self.set_font("Helvetica", "B", 20)
             self.set_text_color(255, 255, 255)
             self.cell(0, 10, "DOMINO'S ORDER ENGINE", align="C", ln=True)
-            self.ln(5)
+            self.set_font("Helvetica", "I", 10)
+            self.set_text_color(240, 240, 240)
+            self.cell(0, 6, "Official Digital Receipt & Tax Invoice", align="C", ln=True)
+            self.ln(10)
 
         def footer(self):
-            self.set_y(-18)
+            self.set_y(-25)
+            self.set_font("Helvetica", "B", 9)
+            self.set_text_color(100, 100, 100)
+            self.cell(0, 5, "THANK YOU FOR YOUR ORDER!", align="C", ln=True)
             self.set_font("Helvetica", "I", 8)
             self.set_text_color(128, 128, 128)
-            self.cell(0, 5, "Domino's Order Engine Platform - Official Digital Receipt", align="C", ln=True)
+            self.cell(0, 5, "Domino's Order Engine Platform - Secure Digital Invoice", align="C", ln=True)
             self.cell(0, 5, "If you need support, please contact the administrator via the Telegram Bot.", align="C", ln=True)
 
     pdf = ReceiptPDF()
     pdf.add_page()
     pdf.set_margins(15, 30, 15)
-    pdf.set_y(30)
+    pdf.set_y(35)
 
     # Helper: strip/replace non-latin-1 chars to prevent fpdf encoding crashes
     def safe_pdf(text: str, max_len: int = 80) -> str:
@@ -3447,60 +3442,68 @@ def get_order_pdf(order_id: str, db: Session = Depends(get_db), admin: User = De
             return "N/A"
         return str(text)[:max_len].encode("latin-1", "replace").decode("latin-1")
     
-    # Title
+    # Title & Barcode section
     pdf.set_font("Helvetica", "B", 14)
     pdf.set_text_color(30, 30, 45)
-    pdf.cell(0, 10, f"INVOICE & RECEIPT (Order ID: {order.id})", ln=True)
-    pdf.ln(2)
+    pdf.cell(100, 10, f"INVOICE #: {order.id.upper()}", ln=0)
+    pdf.set_font("Courier", "", 12)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(80, 10, f"*{order.id.upper()[:12]}*", align="R", ln=True)
+    pdf.ln(5)
     
     # Metadata columns
     pdf.set_font("Helvetica", "", 10)
-    pdf.set_text_color(80, 80, 90)
+    pdf.set_text_color(60, 60, 70)
     
     # Date & Time (IST offset)
     created_at_ist = order.created_at + datetime.timedelta(hours=5, minutes=30)
-    date_str = created_at_ist.strftime("%d %b %Y, %I:%M %p")
+    date_str = created_at_ist.strftime("%d-%m-%Y %I:%M %p")
     
     col_w = 90
+    
+    # Light gray background for headers
+    pdf.set_fill_color(245, 245, 250)
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(col_w, 6, "Order Information", ln=0)
-    pdf.cell(col_w, 6, "Customer Details", ln=1)
+    pdf.cell(col_w, 7, " Order Information", border=1, fill=True, ln=0)
+    pdf.cell(col_w, 7, " Customer Details", border=1, fill=True, ln=1)
     
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(col_w, 5, f"Date: {date_str}", ln=0)
-    pdf.cell(col_w, 5, f"Name: {safe_pdf(order.user.display_name)}", ln=1)
+    pdf.cell(col_w, 6, f"  Date: {date_str}", border="L", ln=0)
+    pdf.cell(col_w, 6, f"  Name: {safe_pdf(order.user.display_name)}", border="L R", ln=1)
 
-    pdf.cell(col_w, 5, f"Transaction ID: {safe_pdf(order.transaction_id)}", ln=0)
-    pdf.cell(col_w, 5, f"Telegram ID: {order.user.telegram_id}", ln=1)
+    pdf.cell(col_w, 6, f"  Transaction ID: {safe_pdf(order.transaction_id)}", border="L", ln=0)
+    pdf.cell(col_w, 6, f"  Telegram ID: {order.user.telegram_id}", border="L R", ln=1)
 
-    pdf.cell(col_w, 5, f"Payment Method: {order.payment_method.upper()}", ln=0)
-    pdf.cell(col_w, 5, f"Phone: {order.phone or 'N/A'}", ln=1)
+    pdf.cell(col_w, 6, f"  Payment Method: {order.payment_method.upper()}", border="L", ln=0)
+    pdf.cell(col_w, 6, f"  Phone: {order.phone or 'N/A'}", border="L R", ln=1)
     
     if order.dominos_reference:
-        pdf.cell(col_w, 5, f"Domino's Ref: {safe_pdf(order.dominos_reference)}", ln=0)
+        pdf.cell(col_w, 6, f"  Domino's Ref: {safe_pdf(order.dominos_reference)}", border="L B", ln=0)
     else:
-        pdf.cell(col_w, 5, "Domino's Ref: Pending Dispatch", ln=0)
-    pdf.cell(col_w, 5, f"City: {safe_pdf(order.city) if order.city else 'N/A'}", ln=1)
+        pdf.cell(col_w, 6, "  Domino's Ref: Pending Dispatch", border="L B", ln=0)
+    pdf.cell(col_w, 6, f"  City: {safe_pdf(order.city) if order.city else 'N/A'}", border="L B R", ln=1)
     
-    pdf.ln(5)
+    pdf.ln(8)
     
     # Address block
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(0, 6, "Delivery Address", ln=True)
+    pdf.cell(0, 7, " Delivery Address", border=1, fill=True, ln=True)
     pdf.set_font("Helvetica", "", 9)
     addr_safe = safe_pdf(order.address or "No address provided", max_len=200)
-    pdf.multi_cell(0, 5, f"{addr_safe}\nCoordinates: Lat {order.latitude}, Lng {order.longitude}")
-    pdf.ln(5)
+    pdf.multi_cell(0, 6, f"  {addr_safe}\n  Coordinates: Lat {order.latitude}, Lng {order.longitude}", border=1)
+    pdf.ln(8)
     
     # Items Table Header
     pdf.set_font("Helvetica", "B", 10)
-    pdf.set_fill_color(240, 240, 245)
-    pdf.cell(90, 8, "Item Description", border=1, fill=True)
-    pdf.cell(30, 8, "Unit Price", border=1, align="C", fill=True)
-    pdf.cell(20, 8, "Qty", border=1, align="C", fill=True)
-    pdf.cell(40, 8, "Subtotal", border=1, align="R", fill=True, ln=True)
+    pdf.set_fill_color(0, 114, 206) # Domino's Blue
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(90, 8, " Item Description", border=1, fill=True)
+    pdf.cell(30, 8, " Unit Price", border=1, align="C", fill=True)
+    pdf.cell(20, 8, " Qty", border=1, align="C", fill=True)
+    pdf.cell(40, 8, " Subtotal", border=1, align="R", fill=True, ln=True)
     
     # Items Table Rows
+    pdf.set_text_color(50, 50, 50)
     pdf.set_font("Helvetica", "", 9)
     for item in order.items:
         desc = item.product.name if item.product else "Unknown Item"
@@ -3511,12 +3514,12 @@ def get_order_pdf(order_id: str, db: Session = Depends(get_db), admin: User = De
             desc += f" ({', '.join(extras)})"
         desc = safe_pdf(desc, max_len=45)
         sub_total_item = item.price * item.quantity
-        pdf.cell(90, 8, desc, border=1)
-        pdf.cell(30, 8, f"INR {item.price:.2f}", border=1, align="C")
+        pdf.cell(90, 8, f" {desc}", border=1)
+        pdf.cell(30, 8, f"₹{item.price:.2f}", border=1, align="C")
         pdf.cell(20, 8, str(item.quantity), border=1, align="C")
-        pdf.cell(40, 8, f"INR {sub_total_item:.2f}", border=1, align="R", ln=True)
+        pdf.cell(40, 8, f"₹{sub_total_item:.2f}", border=1, align="R", ln=True)
         
-    pdf.ln(5)
+    pdf.ln(8)
     
     # Pricing Summary
     pdf.set_x(120)
@@ -3524,23 +3527,23 @@ def get_order_pdf(order_id: str, db: Session = Depends(get_db), admin: User = De
     pdf.cell(40, 7, "Base Price (Fixed):", ln=0)
     pdf.set_font("Helvetica", "", 10)
     base_fixed_price = order.total_payable - order.service_charge
-    pdf.cell(40, 7, f"INR {base_fixed_price:.2f}", ln=1, align="R")
+    pdf.cell(40, 7, f"₹{base_fixed_price:.2f}", ln=1, align="R")
     
     pdf.set_x(120)
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(40, 7, "Bot Service Fee:", ln=0)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(40, 7, f"INR {order.service_charge:.2f}", ln=1, align="R")
+    pdf.cell(40, 7, f"₹{order.service_charge:.2f}", ln=1, align="R")
     
     pdf.set_x(120)
     pdf.line(120, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(1)
+    pdf.ln(2)
     
     pdf.set_x(120)
-    pdf.set_font("Helvetica", "B", 11)
-    pdf.set_text_color(255, 71, 87)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(227, 24, 55) # Domino's Red
     pdf.cell(40, 8, "Total Payable:", ln=0)
-    pdf.cell(40, 8, f"INR {order.total_payable:.2f}", ln=1, align="R")
+    pdf.cell(40, 8, f"₹{order.total_payable:.2f}", ln=1, align="R")
     
     pdf_bytes = bytes(pdf.output())
     return Response(
@@ -3722,7 +3725,7 @@ def get_system_audit_pdf(db: Session = Depends(get_db), admin: User = Depends(ge
             self.set_y(-15)
             self.set_font("Helvetica", "I", 8)
             self.set_text_color(128, 128, 128)
-            self.cell(0, 5, f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Page {self.page_no()}", align="C", ln=True)
+            self.cell(0, 5, f"Generated: {datetime.datetime.now().strftime('%d-%m-%Y %I:%M %p')} | Page {self.page_no()}", align="C", ln=True)
 
     pdf = SystemReportPDF()
     pdf.set_margins(15, 30, 15)
@@ -3787,7 +3790,7 @@ def get_system_audit_pdf(db: Session = Depends(get_db), admin: User = Depends(ge
     pdf.set_font("Helvetica", "", 8)
     for o in orders[:40]:
         pdf.cell(40, 6, str(o.id), 1)
-        pdf.cell(45, 6, o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else 'N/A', 1)
+        pdf.cell(45, 6, o.created_at.strftime('%d-%m-%Y %I:%M %p') if o.created_at else 'N/A', 1)
         pdf.cell(30, 6, f"INR {o.total_payable:.2f}", 1, 0, "R")
         pdf.cell(35, 6, str(o.payment_method), 1)
         pdf.cell(30, 6, str(o.status), 1, 1, "C")
@@ -3810,7 +3813,7 @@ def get_system_audit_pdf(db: Session = Depends(get_db), admin: User = Depends(ge
         pdf.cell(40, 6, str(w.id[:10]), 1)
         pdf.cell(40, 6, safe_pdf(w.upi_id, 20), 1)
         pdf.cell(30, 6, f"INR {w.amount:.2f}", 1, 0, "R")
-        pdf.cell(40, 6, w.created_at.strftime('%Y-%m-%d %H:%M') if w.created_at else 'N/A', 1)
+        pdf.cell(40, 6, w.created_at.strftime('%d-%m-%Y %I:%M %p') if w.created_at else 'N/A', 1)
         pdf.cell(30, 6, str(w.status), 1, 1, "C")
 
     pdf_bytes = pdf.output(dest="S")

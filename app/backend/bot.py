@@ -410,7 +410,7 @@ async def send_admin_user_details(telegram_id: str, target_user_id: str, db: Ses
         return
         
     status_text = "🚫 BLOCKED (Suspended)" if target_user.is_blocked else "🟢 ACTIVE"
-    expiry_text = target_user.admin_expires_at.strftime("%Y-%m-%d %H:%M UTC") if target_user.admin_expires_at else "Permanent / N/A"
+    expiry_text = target_user.admin_expires_at.strftime("%d-%m-%Y %I:%M %p UTC") if target_user.admin_expires_at else "Permanent / N/A"
     
     # Advanced stats queries
     orders_count = db.query(Order).filter(Order.user_id == target_user.id).count()
@@ -425,7 +425,7 @@ async def send_admin_user_details(telegram_id: str, target_user_id: str, db: Ses
     txs_lines = []
     for t in txs:
         t_sign = "+" if t.amount >= 0 else ""
-        txs_lines.append(f"  • {t.type.upper()}: {t_sign}₹{t.amount:.2f} ({t.created_at.strftime('%Y-%m-%d')})")
+        txs_lines.append(f"  • {t.type.upper()}: {t_sign}₹{t.amount:.2f} ({t.created_at.strftime('%d-%m-%Y')})")
     txs_disp = "\n".join(txs_lines) if txs_lines else "  • No transactions yet"
     
     # Fetch last 3 orders
@@ -469,6 +469,9 @@ async def send_admin_user_details(telegram_id: str, target_user_id: str, db: Ses
         ],
         [
             {"text": "📍 Saved Addresses", "callback_data": f"adm_u_addrs_{target_user.id}"}
+        ],
+        [
+            {"text": "💬 Send Message to User", "callback_data": f"admin_msg_user_{target_user.id}"}
         ],
         [
             {"text": "🔙 Back to Users List", "callback_data": "admin_manage_users"}
@@ -572,7 +575,7 @@ def render_admin_order_notification_card(db: Session, order: Order, action_mode:
         header_title = "🔔 <b>NEW PIZZA ORDER FOR ADMIN APPROVAL</b>"
         status_badge = f"⏳ {order.status}"
 
-    created_time = order.created_at.strftime("%Y-%m-%d %H:%M:%S IST") if order.created_at else "Now"
+    created_time = order.created_at.strftime("%d-%m-%Y %I:%M %p IST") if order.created_at else "Now"
 
     card_text = (
         f"{header_title}\n"
@@ -673,7 +676,7 @@ async def send_admin_order_details(telegram_id: str, order_id: str, db: Session,
         ],
         [
             {"text": "🔄 Change Status", "callback_data": f"admin_change_status_menu_{order.id}"},
-            {"text": "🔙 Back to Orders List", "callback_data": "admin_manage_orders_menu"}
+            {"text": "🔙 Back", "callback_data": "admin_view_pending_deposits" if order.id.startswith("TOPUP-") else "admin_view_pending_orders"}
         ]
     ]
     
@@ -989,9 +992,8 @@ async def send_bot_animation(telegram_id: str, animation_url: str, caption: str 
     if caption:
         payload["caption"] = caption
         payload["parse_mode"] = "HTML"
-    import json
     if reply_markup:
-        payload["reply_markup"] = json.dumps(reply_markup)
+        payload["reply_markup"] = reply_markup
         
     try:
         resp = await _http_client.post(url, json=payload, timeout=15.0)
@@ -1008,7 +1010,10 @@ async def send_bot_animation(telegram_id: str, animation_url: str, caption: str 
         try:
             with open(local_path, "rb") as f:
                 cap_text = caption[:995] + "..." if (caption and len(caption) > 1000) else caption
-                resp = await _http_client.post(url, data={"chat_id": telegram_id, "caption": cap_text, "parse_mode": "HTML"}, files={"animation": f}, timeout=25.0)
+                req_data = {"chat_id": telegram_id, "caption": cap_text, "parse_mode": "HTML"}
+                if reply_markup:
+                    req_data["reply_markup"] = json.dumps(reply_markup) if isinstance(reply_markup, dict) else reply_markup
+                resp = await _http_client.post(url, data=req_data, files={"animation": f}, timeout=25.0)
                 if resp.status_code == 200:
                     res_data = resp.json()
                     return res_data.get("result", {}).get("message_id", True)
@@ -1723,10 +1728,11 @@ def render_cart_message(db: Session, user: User, cart: dict, session: dict) -> t
 
         if item_type == "offer":
             badge_str = f" {obj.badge}" if (obj and obj.badge) else ""
-            item_lines.append(f"🎉 <b>{escape_html(item_name)}</b>{badge_str}\n   {qty} × ₹{unit_price:.0f}  —  <b>₹{line_total:.0f}</b>")
+            block = f"🎉 <b>{escape_html(item_name)}</b>{badge_str}\n   {qty} × ₹{unit_price:.0f}  —  <b>₹{line_total:.0f}</b>"
             if items_breakdown:
                 for b in items_breakdown:
-                    item_lines.append(f"   └ <i>{b}</i>")
+                    block += f"\n   └ <i>{b}</i>"
+            item_lines.append(block)
         else:
             veg_dot = "🟢" if (obj and getattr(obj, "is_veg", True)) else "🔴"
             item_lines.append(f"{veg_dot} <b>{escape_html(item_name)}</b>\n   {qty} × ₹{unit_price:.0f}  —  <b>₹{line_total:.0f}</b>")
@@ -3495,6 +3501,31 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         res = await send_bot_message(user.telegram_id, confirm_text, reply_markup=confirm_markup)
         if isinstance(res, int):
             session["last_bot_msg_id"] = res
+        return
+
+    elif session.get("state") and session.get("state").startswith("admin_sending_user_msg_"):
+        if not is_admin:
+            session["state"] = None
+            await send_bot_message(telegram_id, "Unauthorized.")
+            return
+            
+        target_id = session.get("state").replace("admin_sending_user_msg_", "").strip()
+        target_user = db.query(DbUser).filter(DbUser.id == target_id).first()
+        if not target_user:
+            await send_bot_message(telegram_id, "❌ User not found.", reply_markup=main_keyboard)
+        else:
+            try:
+                msg_text = f"📩 <b>Message from Admin:</b>\n\n{text}"
+                success = await send_bot_message(target_user.telegram_id, msg_text)
+                if success:
+                    await send_bot_message(telegram_id, f"✅ Message successfully sent to {target_user.display_name}!", reply_markup=main_keyboard)
+                else:
+                    await send_bot_message(telegram_id, f"❌ Failed to send message to {target_user.display_name}. They may have blocked the bot.", reply_markup=main_keyboard)
+            except Exception as e:
+                await send_bot_message(telegram_id, f"❌ Error sending message: {e}", reply_markup=main_keyboard)
+                
+        session["state"] = None
+        db.commit()
         return
 
     elif session.get("state") and session.get("state").startswith("admin_waiting_wallet_adj_"):
@@ -5922,16 +5953,24 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         upi_id = upi_id_cfg.value if upi_id_cfg else "pranjalottery@fam"
         upi_name = upi_name_cfg.value if upi_name_cfg else "Domino's Order Engine"
         
-        upi_details = generate_upi_qr_details(upi_id, upi_name, order.total_payable, order.id, f"Order {order.id}")
+        pay_amount = order.upi_paid if getattr(order, "upi_paid", 0.0) > 0 else order.total_payable
+        upi_details = generate_upi_qr_details(upi_id, upi_name, pay_amount, order.id, f"Order {order.id}")
         upi_uri = upi_details["upi_uri"]
         qr_url = upi_details["qr_code_url"]
         qr_data_url = upi_details.get("qr_data_url", "")
+        
+        breakdown_text = f"• <b>Total Payable:</b> ₹{order.total_payable:.2f}\n"
+        if getattr(order, "wallet_applied", 0.0) > 0:
+            breakdown_text += f"• <b>Wallet Applied:</b> -₹{order.wallet_applied:.2f}\n"
+            breakdown_text += f"• <b>Amount to Pay (UPI):</b> <b>₹{pay_amount:.2f}</b>\n\n"
+        else:
+            breakdown_text = f"• <b>Amount:</b> <b>₹{pay_amount:.2f}</b>\n\n"
         
         payment_text = (
             f"💳 <b>UPI Payment Request</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"• <b>Order ID:</b> <code>{order.id}</code>\n"
-            f"• <b>Amount:</b> <b>₹{order.total_payable:.2f}</b>\n\n"
+            f"{breakdown_text}"
             f"👉 <a href=\"{upi_uri}\"><b>📱 Click Here to Pay via UPI App</b></a> (mobile) or scan the QR code above.\n\n"
             f"📝 <b>After Payment:</b>\n"
             f"• Tap <b>✅ I Have Paid</b> below after completing payment in your UPI app."
@@ -6656,7 +6695,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 self.set_y(-15)
                 self.set_font("Helvetica", "I", 8)
                 self.set_text_color(128, 128, 128)
-                self.cell(0, 5, f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Page {self.page_no()}", align="C", ln=True)
+                self.cell(0, 5, f"Generated: {datetime.datetime.now().strftime('%d-%m-%Y %I:%M %p')} | Page {self.page_no()}", align="C", ln=True)
 
         pdf = SystemReportPDF()
         pdf.set_margins(15, 25, 15)
@@ -6715,7 +6754,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 pdf.set_text_color(0, 0, 0)
                 for o in user_orders:
                     pdf.cell(40, 6, _clean_str(str(o.id)), 1)
-                    pdf.cell(45, 6, _clean_str(o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else 'N/A'), 1)
+                    pdf.cell(45, 6, _clean_str(o.created_at.strftime('%d-%m-%Y %I:%M %p') if o.created_at else 'N/A'), 1)
                     pdf.cell(30, 6, _clean_str(f"INR {o.total_payable:.2f}"), 1, 0, "R")
                     pdf.cell(30, 6, _clean_str(str(o.payment_method).upper()), 1, 0, "C")
                     pdf.cell(35, 6, _clean_str(str(o.status)), 1, 1, "C")
@@ -6742,7 +6781,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 pdf.set_font("Helvetica", "", 8)
                 pdf.set_text_color(0, 0, 0)
                 for tx in user_txns:
-                    pdf.cell(45, 6, _clean_str(tx.created_at.strftime('%Y-%m-%d %H:%M') if tx.created_at else 'N/A'), 1)
+                    pdf.cell(45, 6, _clean_str(tx.created_at.strftime('%d-%m-%Y %I:%M %p') if tx.created_at else 'N/A'), 1)
                     pdf.cell(30, 6, _clean_str(str(tx.type).upper()), 1, 0, "C")
                     pdf.cell(35, 6, _clean_str(f"INR {tx.amount:.2f}"), 1, 0, "R")
                     pdf.cell(70, 6, _clean_str((tx.description or 'N/A')[:40]), 1, 1, "L")
@@ -7001,27 +7040,34 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             return
             
         all_users = db.query(DbUser).filter(DbUser.telegram_id.isnot(None)).all()
-        sent_count = 0
-        fail_count = 0
         
-        for target_u in all_users:
-            if target_u.telegram_id:
-                ok = await send_bot_message(target_u.telegram_id, f"📢 <b>Announcement from Admin:</b>\n\n{broadcast_text}")
-                if ok:
-                    sent_count += 1
-                else:
-                    fail_count += 1
-                    
+        async def run_broadcast(users, text, admin_id, m_id):
+            sent_count = 0
+            fail_count = 0
+            for target_u in users:
+                if target_u.telegram_id:
+                    import asyncio
+                    ok = await send_bot_message(target_u.telegram_id, f"📢 <b>Announcement from Admin:</b>\n\n{text}")
+                    if ok:
+                        sent_count += 1
+                    else:
+                        fail_count += 1
+                    await asyncio.sleep(0.05) # Rate limit safety
+            report_msg = (
+                f"✅ <b>Broadcast Completed!</b>\n\n"
+                f"• <b>Sent Successfully:</b> {sent_count} users\n"
+                f"• <b>Failed / Blocked:</b> {fail_count} users"
+            )
+            await edit_bot_message(admin_id, m_id, report_msg, reply_markup={"inline_keyboard": [[{"text": "🔙 Back", "callback_data": "admin_refresh_stats"}]]})
+            
+        import asyncio
+        asyncio.create_task(run_broadcast(all_users, broadcast_text, user.telegram_id, message_id))
+        
         session["state"] = None
         session["temp_broadcast_text"] = None
         
-        report_msg = (
-            f"✅ <b>Broadcast Completed!</b>\n\n"
-            f"• <b>Sent Successfully:</b> {sent_count} users\n"
-            f"• <b>Failed / Blocked:</b> {fail_count} users"
-        )
-        await edit_bot_message(user.telegram_id, message_id, report_msg, reply_markup={"inline_keyboard": [[{"text": "🔙 Back", "callback_data": "admin_refresh_stats"}]]})
-        await answer_callback_query(callback_query_id, "Broadcast Sent!")
+        await edit_bot_message(user.telegram_id, message_id, "⏳ <b>Broadcasting...</b>\n\nSending messages to all users. This may take a moment. You will be notified here when finished.", reply_markup={"inline_keyboard": [[{"text": "🔙 Back (Running in background)", "callback_data": "admin_refresh_stats"}]]})
+        await answer_callback_query(callback_query_id, "Broadcast started!")
         return
 
     elif data == "admin_direct_msg_start":
@@ -7119,6 +7165,9 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 [
                     {"text": "💬 Support Tickets (24h)", "callback_data": "admin_view_support_tickets"},
                     {"text": "⚠️ View Error Logs", "callback_data": "admin_view_error_logs"}
+                ],
+                [
+                    {"text": "🔙 Exit to User Menu", "callback_data": "start_menu"}
                 ]
             ]
         }
@@ -7544,7 +7593,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         pending_orders = db.query(Order).filter(
             Order.status.in_(["Paid", "Pending Payment", "Pending Verification", "Order Processing"]),
             ~Order.id.like("TOPUP-%")
-        ).order_by(Order.created_at.desc()).limit(10).all()
+        ).order_by(Order.created_at.desc()).limit(15).all()
         
         if not pending_orders:
             await edit_bot_message(
@@ -7560,33 +7609,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         buttons = []
         for o in pending_orders:
             u_name = o.user.display_name if o.user else f"User_{o.user_id}"
-            u_tg_id = o.user.telegram_id if o.user else o.user_id
-            phone_num = o.phone or "Not provided"
-            full_addr = (o.address or "Address pending").strip()
-            items_str = "  • " + ", ".join([f"{it.quantity}x {it.item_name or (it.product.name if it.product else 'Pizza Item')}" for it in o.items]) if o.items else "  • Pizza Order Items"
+            dt_str = o.created_at.strftime("%d %b %I:%M %p") if o.created_at else "Recently"
+            msg += f"• <code>{o.id[-6:]}</code> - <b>{escape_html(u_name)}</b> (₹{o.total_payable:.0f}) - <i>{o.status}</i>\n"
+            buttons.append([{"text": f"⚙️ Manage Order {o.id[-6:]}", "callback_data": f"admin_view_order_{o.id}"}])
             
-            msg += (
-                f"🍕 <b>Order ID:</b> <code>{o.id}</code>\n"
-                f"👤 <b>Customer:</b> <b>{u_name}</b> (ID: <code>{u_tg_id}</code>)\n"
-                f"📱 <b>Phone:</b> <code>{phone_num}</code>\n"
-                f"🏡 <b>Location:</b> <code>{full_addr}</code>\n"
-                f"📦 <b>Items:</b>\n{items_str}\n"
-                f"💰 <b>Total Bill:</b> <b>₹{o.total_payable:.2f}</b> (Paid via: <b>{(o.payment_method or 'wallet').upper()}</b>)\n"
-                f"🏷️ <b>Status:</b> <code>{o.status}</code>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            )
-            action_buttons = []
-            if o.status == "Pending Verification":
-                action_buttons.append([
-                    {"text": f"✅ Approve Deposit/Order", "callback_data": f"admin_dep_approve_{o.id}" if o.id.startswith("TOPUP-") else f"admin_act_approve_{o.id}"},
-                    {"text": f"❌ Reject", "callback_data": f"admin_dep_reject_{o.id}" if o.id.startswith("TOPUP-") else f"admin_act_reject_{o.id}"}
-                ])
-            else:
-                action_buttons.append([
-                    {"text": f"✅ Complete ({o.id[-6:]})", "callback_data": f"admin_act_complete_{o.id}"},
-                    {"text": f"❌ Reject ({o.id[-6:]})", "callback_data": f"admin_act_reject_{o.id}"}
-                ])
-            buttons.extend(action_buttons)
         buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
         await answer_callback_query(callback_query_id)
@@ -7805,21 +7831,9 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         action_buttons = []
         for o in deposits:
             u_name = o.user.display_name if o.user else f"User_{o.user_id}"
-            u_tg_id = o.user.telegram_id if o.user else o.user_id
-            utr_ref = o.transaction_id or "Auto-Verification"
-            dt_str = o.created_at.strftime("%d %b %H:%M") if o.created_at else "Recently"
-            msg += (
-                f"💳 <b>Deposit ID:</b> <code>{o.id}</code> ({dt_str})\n"
-                f"👤 <b>User:</b> <b>{escape_html(u_name)}</b> (ID: <code>{u_tg_id}</code>)\n"
-                f"💵 <b>Amount:</b> <b>₹{o.total_payable:.2f}</b> | Ref: <code>{utr_ref}</code>\n"
-                f"🏷️ <b>Status:</b> <code>{o.status}</code>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            )
-            if o.status in ["Pending Verification", "Pending Payment"]:
-                action_buttons.append([
-                    {"text": f"✅ Approve ₹{o.total_payable:.0f} ({o.id[-6:]})", "callback_data": f"admin_dep_approve_{o.id}"},
-                    {"text": f"❌ Reject ({o.id[-6:]})", "callback_data": f"admin_dep_reject_{o.id}"}
-                ])
+            dt_str = o.created_at.strftime("%d %b %I:%M %p") if o.created_at else "Recently"
+            msg += f"• <code>{o.id[-6:]}</code> - <b>{escape_html(u_name)}</b> (₹{o.total_payable:.0f}) - <i>{o.status}</i>\n"
+            action_buttons.append([{"text": f"⚙️ Manage Deposit {o.id[-6:]}", "callback_data": f"admin_view_order_{o.id}"}])
                 
         buttons = filter_buttons + action_buttons + [[{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}]]
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
@@ -8071,6 +8085,26 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await answer_callback_query(callback_query_id)
         return
 
+    elif data.startswith("admin_msg_user_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        target_id = data.replace("admin_msg_user_", "").strip()
+        session["state"] = f"admin_sending_user_msg_{target_id}"
+        cancel_markup = {
+            "keyboard": [[{"text": "❌ Cancel"}]],
+            "resize_keyboard": True,
+            "one_time_keyboard": True
+        }
+        await delete_bot_message(user.telegram_id, message_id)
+        await send_bot_message(
+            user.telegram_id,
+            "💬 <b>Send Personal Message:</b>\n\nPlease type the message you want to send to this user directly (text only):",
+            reply_markup=cancel_markup
+        )
+        await answer_callback_query(callback_query_id)
+        return
+
     elif data.startswith("admin_user_detail_"):
         if not is_admin:
             await answer_callback_query(callback_query_id, "Unauthorized!")
@@ -8277,7 +8311,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             f"👑 <b>Manage Role: {target_user.display_name}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"Current Role: <code>{target_user.role.upper()}</code>\n"
-            f"Current Expiry: <code>{target_user.admin_expires_at.strftime('%Y-%m-%d %H:%M UTC') if target_user.admin_expires_at else 'Permanent / N/A'}</code>\n\n"
+            f"Current Expiry: <code>{target_user.admin_expires_at.strftime('%d-%m-%Y %I:%M %p UTC') if target_user.admin_expires_at else 'Permanent / N/A'}</code>\n\n"
             f"Select one of the actions below to promote or demote this user:"
         )
         
@@ -8383,7 +8417,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         for t in txs:
             t_sign = "+" if t.amount >= 0 else ""
             desc = f" ({t.description})" if t.description else ""
-            date_str = t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else "—"
+            date_str = t.created_at.strftime("%d-%m-%Y %I:%M %p") if t.created_at else "—"
             msg += f"• [{date_str}] [Type: <b>{t.type.upper()}</b>]\n  Amount: <b>{t_sign}₹{t.amount:.2f}</b>{desc}\n\n"
             
         if not txs:
@@ -8430,7 +8464,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         buttons = []
         for o in orders:
             status_emoji = "🟢" if o.status == "Completed" else "🟡" if o.status in ["Paid", "Order Processing"] else "🔴"
-            date_str = o.created_at.strftime("%Y-%m-%d %H:%M") if o.created_at else "—"
+            date_str = o.created_at.strftime("%d-%m-%Y %I:%M %p") if o.created_at else "—"
             msg += f"{status_emoji} Order: <code>{o.id}</code>\n  Amount: <b>₹{o.total_payable:.2f}</b> • Status: <code>{o.status}</code> • [{date_str}]\n\n"
             buttons.append([{"text": f"⚙️ Manage {o.id[:12]}...", "callback_data": f"admin_view_order_{o.id}"}])
             
@@ -8733,7 +8767,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             conf_text = (
                 f"⏳ <b>Payment Submitted for Verification!</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🆔 <b>Order / Deposit ID:</b> <code>{order.id}</code>\n"
+                f"🆔 <b>{'Topup ID:' if order.id.startswith('TOPUP-') else 'Order ID:'}</b> <code>{order.id}</code>\n"
                 f"💵 <b>Amount:</b> <b>₹{order.total_payable:.2f}</b>\n\n"
                 f"<i>Our support team will verify your payment and process your request shortly! 🍕</i>"
             )
@@ -8805,7 +8839,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         conf_text = (
             f"⏳ <b>Payment Submitted for Verification!</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🆔 <b>Order / Deposit ID:</b> <code>{order.id}</code>\n"
+            f"🆔 <b>{'Topup ID:' if order.id.startswith('TOPUP-') else 'Order ID:'}</b> <code>{order.id}</code>\n"
             f"💵 <b>Amount:</b> <b>₹{order.total_payable:.2f}</b>\n"
             f"🔢 <b>Transaction Ref:</b> <code>{ref_code}</code>\n\n"
             f"<i>Our support team will verify your payment and process your request shortly! 🍕</i>"
@@ -9674,7 +9708,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             db.commit()
             auto_save_persistent_db_state(db)
             
-            pay_amount = total_payable if is_direct_qr else (total_payable - user.wallet_balance)
+            pay_amount = total_payable if is_direct_qr else remaining_upi
             
             upi_id_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_id").first()
             upi_name_cfg = db.query(SystemConfig).filter(SystemConfig.key == "upi_name").first()
@@ -9686,12 +9720,19 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             qr_url = upi_details["qr_code_url"]
             qr_data_url = upi_details.get("qr_data_url", "")
 
+            breakdown_text = f"• <b>Total Payable:</b> ₹{total_payable:.2f}\n"
+            if not is_direct_qr and wallet_usable > 0:
+                breakdown_text += f"• <b>Wallet Applied:</b> -₹{wallet_usable:.2f}\n"
+                breakdown_text += f"• <b>Amount to Pay (UPI):</b> <b>₹{pay_amount:.2f}</b>\n"
+            else:
+                breakdown_text += f"• <b>Amount to Pay:</b> <b>₹{pay_amount:.2f}</b>\n"
+
             pending_text = (
                 f"📱 <b>Direct Order Payment — UPI QR Code</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"Your order <code>{order_id}</code> is created and is in ⏳ <b>PENDING PAYMENT</b> status.\n\n"
                 f"• <b>Order Reference:</b> <code>{ref_id}</code>\n"
-                f"• <b>Total Amount to Pay:</b> <b>₹{pay_amount:.2f}</b>\n"
+                f"{breakdown_text}"
                 f"• <b>UPI ID:</b> <code>{upi_id}</code>\n"
                 f"⏳ <i>Note: This payment window expires in 10 minutes.</i>\n\n"
                 f"⚡ <b>Direct UPI Payment Link (Prefilled):</b>\n"
@@ -9961,12 +10002,6 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
 
 async def process_bot_callback_task(telegram_id: str, first_name: str, last_name: str, username: str, data: str, message_id: int, callback_query_id: str):
     """Processes callback query button clicks in a concurrent background task."""
-    # Acknowledge callback immediately to dismiss loading spinner on client
-    if callback_query_id:
-        try:
-            await answer_callback_query(callback_query_id)
-        except Exception:
-            pass
 
     if check_rate_limit(telegram_id, is_callback=True):
         return
@@ -10004,6 +10039,13 @@ async def process_bot_callback_task(telegram_id: str, first_name: str, last_name
                 user.bot_state = session.get("state")
                 user.bot_cart = json.dumps(session.get("cart", {}))
                 db.commit()
+                
+            # Acknowledge callback at the end to stop spinner (fails silently if already answered)
+            if callback_query_id:
+                try:
+                    await answer_callback_query(callback_query_id)
+                except Exception:
+                    pass
         except Exception as e:
             tb = traceback.format_exc()
             # 1. Always print to terminal so it shows in uvicorn log

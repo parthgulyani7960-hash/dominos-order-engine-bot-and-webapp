@@ -1041,6 +1041,11 @@ def auto_restore_persistent_db_state(db) -> bool:
                     upi_paid=float(o_data.get("upi_paid", 0.0)),
                     transaction_id=o_data.get("transaction_id", f"TXN-{uuid.uuid4().hex[:10].upper()}")
                 )
+                if o_data.get("created_at"):
+                    try:
+                        o.created_at = datetime.datetime.fromisoformat(o_data["created_at"])
+                    except ValueError:
+                        pass
                 db.add(o)
                 db.flush()
                 
@@ -1072,6 +1077,11 @@ def auto_restore_persistent_db_state(db) -> bool:
                     amount=float(tx_rec.get("amount", 0.0)),
                     description=tx_rec.get("description")
                 )
+                if tx_rec.get("created_at"):
+                    try:
+                        t.created_at = datetime.datetime.fromisoformat(tx_rec["created_at"])
+                    except ValueError:
+                        pass
                 db.add(t)
 
         for c_rec in data.get("coupons", []):
