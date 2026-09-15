@@ -4067,22 +4067,20 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             except Exception:
                 pass
             try:
-                from app.backend.database import OrderNote, OrderStatusHistory, OrderItem, UTRAttempt, QRGenerationHistory, RiderAssignment, WalletTransaction, WithdrawalRequest, SavedAddress, Order, SupportMessage, User
+                from app.backend.database import QRGenerationHistory as _QRGenerationHistory
                 import os
                 main_admin_id = os.getenv("ADMIN_TELEGRAM_ID", "7958236048").strip()
                 db.query(OrderNote).delete(synchronize_session=False)
                 db.query(OrderStatusHistory).delete(synchronize_session=False)
                 db.query(OrderItem).delete(synchronize_session=False)
                 db.query(UTRAttempt).delete(synchronize_session=False)
-                db.query(QRGenerationHistory).delete(synchronize_session=False)
+                db.query(_QRGenerationHistory).delete(synchronize_session=False)
                 db.query(RiderAssignment).delete(synchronize_session=False)
                 db.query(WalletTransaction).delete(synchronize_session=False)
                 db.query(WithdrawalRequest).delete(synchronize_session=False)
                 db.query(SavedAddress).delete(synchronize_session=False)
                 db.query(Order).delete(synchronize_session=False)
                 db.query(SupportMessage).delete(synchronize_session=False)
-                # Ensure we import ErrorLog
-                from app.backend.database import ErrorLog
                 db.query(ErrorLog).delete(synchronize_session=False)
                 
                 db.query(User).filter(User.telegram_id != str(main_admin_id)).delete(synchronize_session=False)
