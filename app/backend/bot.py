@@ -9362,8 +9362,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "Receipt not available!", show_alert=True)
             return
             
-        file_id = order.screenshot_url.replace("telegram_file:", "")
-        await send_bot_photo(user.telegram_id, file_id, f"🧾 <b>Receipt for Order: {order_id}</b>")
+        await send_bot_photo(user.telegram_id, order.screenshot_url, f"🧾 <b>Receipt for Order: {order_id}</b>")
         await answer_callback_query(callback_query_id)
         return
 
