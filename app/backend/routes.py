@@ -1098,8 +1098,8 @@ async def mark_order_paid_web(order_id: str, db: Session = Depends(get_db)):
         if not order:
             return {"success": False, "message": "Order not found"}
             
-        # Idempotency check: if already completed/approved/paid, do not reset
-        if order.status in ("Completed", "Approved", "Paid", "Order Processing"):
+        # Idempotency check: if already completed/approved/paid/pending, do not reset or send duplicate alerts
+        if order.status in ("Pending Verification", "Completed", "Approved", "Paid", "Order Processing"):
             return {"success": True, "status": order.status, "already_processed": True}
             
         ref_code = f"{'TOPUP-REF' if order.id.startswith('TOPUP-') else 'BOT-TXN'}-{uuid.uuid4().hex[:6].upper()}"
@@ -1213,245 +1213,44 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
     
     qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote_plus(upi_uri)}"
     
+    bot_username = os.environ.get("BOT_USERNAME", "DominoOrderEngineSupportBot")
+    bot_fallback_url = f"https://t.me/{bot_username}"
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UPI Payment — {order.id}</title>
+    <title>Redirecting to Payment...</title>
     <style>
-        body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 90vh; text-align: center; }}
-        .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 20px; padding: 28px 20px; max-width: 400px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); position: relative; overflow: hidden; box-sizing: border-box; }}
-        .badge {{ display: inline-block; padding: 6px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; margin-bottom: 12px; background: #0284c7; color: white; transition: all 0.3s ease; }}
-        .timer-badge {{ font-size: 12px; color: #94a3b8; margin-bottom: 16px; }}
-        .qr-box {{ background: #ffffff; padding: 12px; border-radius: 16px; display: inline-block; margin: 12px 0; border: 2px solid #38bdf8; }}
-        .qr-box img {{ display: block; width: 160px; height: 160px; border-radius: 8px; }}
-        .vpa-box {{ background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 10px 14px; font-size: 14px; font-family: monospace; color: #38bdf8; margin: 12px 0; display: flex; align-items: center; justify-content: space-between; cursor: pointer; }}
-        .btn {{ display: block; width: 100%; box-sizing: border-box; background: #2563eb; color: white; text-decoration: none; padding: 14px 20px; border-radius: 12px; font-weight: 700; font-size: 15px; margin-top: 10px; border: none; cursor: pointer; transition: transform 0.1s, background-color 0.2s; }}
-        .btn:active {{ transform: scale(0.98); }}
-        .btn:disabled {{ opacity: 0.6; cursor: not-allowed; }}
-        .btn-phonepe {{ background: #5f259f; color: white; }}
-        .btn-gpay {{ background: #1a73e8; color: white; }}
-        .btn-paytm {{ background: #00baf2; color: white; }}
-        .btn-secondary {{ background: #334155; color: #cbd5e1; }}
-        .btn-action {{ background: #0284c7; color: #fff; font-weight: 800; }}
-        .toast {{ position: fixed; bottom: 20px; background: #16a34a; color: white; padding: 10px 20px; border-radius: 9999px; font-weight: 600; font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }}
-        .spinner {{ display: inline-block; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }}
+        body {{ font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; text-align: center; margin: 0; }}
+        .spinner {{ width: 40px; height: 40px; border: 4px solid rgba(255,255,255,0.1); border-radius: 50%; border-top-color: #38bdf8; animation: spin 1s linear infinite; margin-bottom: 20px; }}
         @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+        .text {{ font-size: 18px; font-weight: 600; color: #e2e8f0; }}
+        .subtext {{ font-size: 13px; color: #94a3b8; margin-top: 10px; max-width: 300px; line-height: 1.5; }}
     </style>
 </head>
 <body>
-    <div class="card">
-        <div id="statusBadge" class="badge">⏳ Awaiting Payment...</div>
-        <div id="timerBadge" class="timer-badge">Session expires in: <span id="timerClock" style="font-weight: 700; color: #38bdf8;">10:00</span></div>
-        
-        <h3 style="margin: 0 0 4px 0; color: #38bdf8;">Domino's Order Engine</h3>
-        <p style="margin: 0 0 12px 0; font-size: 13px; color: #94a3b8;">Ref ID: <code style="color: #cbd5e1;">{order.id}</code></p>
-        
-        <div style="font-size: 32px; font-weight: 800; color: #4ade80; margin-bottom: 8px;">₹{pay_amt:.2f}</div>
-        
-        <!-- Inline QR Code -->
-        <div class="qr-box">
-            <img src="{qr_code_url}" alt="Scan UPI QR Code">
-        </div>
-        <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">Scan with GPay, PhonePe, Paytm, or BHIM</div>
-
-        <!-- Copy VPA Box -->
-        <div class="vpa-box" onclick="copyVpa('{upi_id}')">
-            <span>UPI: <b id="vpaText">{upi_id}</b></span>
-            <span style="font-size: 12px; background: #2563eb; color: white; padding: 2px 8px; border-radius: 6px;">Copy</span>
-        </div>
-        
-        <!-- App Specific Launch Buttons -->
-        <a id="phonepeBtn" href="{phonepe_intent}" class="btn btn-phonepe">🟣 Pay via PhonePe</a>
-        <a id="gpayBtn" href="{gpay_intent}" class="btn btn-gpay">🔵 Pay via Google Pay</a>
-        <a id="paytmBtn" href="{paytm_intent}" class="btn btn-paytm">🔷 Pay via Paytm</a>
-        <a id="openUpiBtn" href="{upi_uri}" class="btn btn-secondary">⚡ Pay via Any UPI App</a>
-        
-        <button id="markPaidBtn" onclick="markPaid()" class="btn btn-secondary" style="margin-top: 14px; background: #16a34a; color: white;">✅ I Have Completed Payment</button>
-        
-        <div id="feedbackBox" style="display: none; margin-top: 12px; padding: 12px 14px; border-radius: 12px; font-size: 13px; text-align: left; background: #0f172a; border: 1px solid #334155; color: #38bdf8; line-height: 1.4;"></div>
-        
-        <button id="newPayBtn" onclick="generateNewPaymentLink()" class="btn btn-action" style="display: none;">➕ Generate New Payment Link</button>
-        <a id="supportBtn" href="https://t.me/DominoOrderEngineSupportBot?text=Report+Payment+Issue+Ref+{order.id}" target="_blank" class="btn btn-secondary" style="margin-top: 10px; font-size: 13px;">💬 Contact Support / Report Issue</a>
-        
-        <p style="font-size: 11px; color: #64748b; margin-top: 16px; line-height: 1.4;">
-            📡 Live Auto-Tracking active. Tap "I Have Completed Payment" or return from app to verify.
-        </p>
-    </div>
-
-    <div id="toast" class="toast">Copied UPI ID!</div>
+    <div class="spinner"></div>
+    <div class="text">Opening UPI App...</div>
+    <div class="subtext">You are being securely redirected to complete your payment for {order.id}.<br><br>If nothing happens, please return to the Telegram Bot.</div>
 
     <script>
-        // Adapt URLs for iOS devices
         const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-        if (isIOS) {{
-            document.getElementById('phonepeBtn').href = "phonepe://pay?pa={upi_id}&pn={encoded_name}&am={pay_amt:.2f}&tr={order.id}&tn={encoded_note}&cu=INR";
-            document.getElementById('gpayBtn').href = "{upi_uri}";
-            document.getElementById('paytmBtn').href = "paytmmp://pay?pa={upi_id}&pn={encoded_name}&am={pay_amt:.2f}&tr={order.id}&tn={encoded_note}&cu=INR";
-        }}
-        let isProcessing = false;
-        let timeLeftSeconds = 600;
+        const upiUri = "{upi_uri}";
+        
+        // Auto-redirect to UPI
+        setTimeout(() => {{
+            window.location.href = upiUri;
+        }}, 300);
 
-        function copyVpa(vpa) {{
-            navigator.clipboard.writeText(vpa);
-            const toast = document.getElementById('toast');
-            toast.style.opacity = '1';
-            setTimeout(() => toast.style.opacity = '0', 2000);
-        }}
-
-        async function generateNewPaymentLink() {{
-            const btn = document.getElementById('newPayBtn');
-            btn.innerHTML = '<span class="spinner"></span> Generating New Link...';
-            btn.disabled = true;
-            try {{
-                const res = await fetch('/api/pay_new/{order.id}', {{ method: 'POST' }});
-                if (res.ok) {{
-                    const data = await res.json();
-                    if (data.new_pay_url) {{
-                        window.location.href = data.new_pay_url;
-                        return;
-                    }}
-                }}
-            }} catch (e) {{}}
-            window.location.reload();
-        }}
-
-        // Session Countdown Timer
-        const timerInterval = setInterval(function() {{
-            if (timeLeftSeconds <= 0) {{
-                clearInterval(timerInterval);
-                document.getElementById('timerClock').innerText = '00:00';
-                const badge = document.getElementById('statusBadge');
-                badge.style.background = '#dc2626';
-                badge.style.color = '#fff';
-                badge.innerText = '❌ Payment Session Expired';
-                document.getElementById('phonepeBtn').style.display = 'none';
-                document.getElementById('gpayBtn').style.display = 'none';
-                document.getElementById('paytmBtn').style.display = 'none';
-                document.getElementById('openUpiBtn').style.display = 'none';
-                document.getElementById('markPaidBtn').style.display = 'none';
-                document.getElementById('newPayBtn').style.display = 'block';
-            }} else {{
-                timeLeftSeconds--;
-                const mins = Math.floor(timeLeftSeconds / 60).toString().padStart(2, '0');
-                const secs = (timeLeftSeconds % 60).toString().padStart(2, '0');
-                document.getElementById('timerClock').innerText = mins + ':' + secs;
-            }}
-        }}, 1000);
-
-        // Network Offline / Online Detection
-        window.addEventListener('offline', function() {{
-            const badge = document.getElementById('statusBadge');
-            badge.style.background = '#f59e0b';
-            badge.style.color = '#000';
-            badge.innerHTML = '⚠️ Network Disconnected — Reconnecting...';
-        }});
-
-        window.addEventListener('online', function() {{
-            checkStatus();
-        }});
-
-        // Real-time Status Poller
-        async function checkStatus() {{
-            try {{
-                const res = await fetch('/api/pay_status/{order.id}');
-                if (res.ok) {{
-                    const data = await res.json();
-                    const badge = document.getElementById('statusBadge');
-                    const feedback = document.getElementById('feedbackBox');
-                    
-                    if (data.completed) {{
-                        isProcessing = true;
-                        clearInterval(timerInterval);
-                        document.getElementById('timerBadge').style.display = 'none';
-                        badge.style.background = '#16a34a';
-                        badge.style.color = '#fff';
-                        badge.innerHTML = '✅ Payment Confirmed & Approved!';
-                        const btn = document.getElementById('markPaidBtn');
-                        if (btn) {{
-                            btn.style.background = '#16a34a';
-                            btn.innerHTML = '✅ Payment Approved & Credited';
-                            btn.disabled = true;
-                        }}
-                        if (feedback) {{
-                            feedback.style.display = 'block';
-                            feedback.style.borderColor = '#16a34a';
-                            feedback.style.color = '#4ade80';
-                            feedback.innerHTML = '🎉 <b>Deposit Approved!</b><br>Your wallet balance has been updated successfully.';
-                        }}
-                    }} else if (data.status === 'Pending Verification' || data.verified) {{
-                        badge.style.background = '#eab308';
-                        badge.style.color = '#000';
-                        badge.innerHTML = '⏳ Submitted — Awaiting Admin Approval...';
-                        const btn = document.getElementById('markPaidBtn');
-                        if (btn && !btn.disabled) {{
-                            btn.style.background = '#eab308';
-                            btn.style.color = '#000';
-                            btn.innerHTML = '⏳ Submitted for Verification';
-                            btn.disabled = true;
-                        }}
-                        if (feedback) {{
-                            feedback.style.display = 'block';
-                            feedback.style.borderColor = '#eab308';
-                            feedback.style.color = '#fde047';
-                            feedback.innerHTML = '⏳ <b>Verification Request Logged!</b><br>Our Admin team has received your request on Telegram. Updates appear live here.';
-                        }}
-                    }} else if (data.cancelled) {{
-                        badge.style.background = '#dc2626';
-                        badge.style.color = '#fff';
-                        badge.innerHTML = '❌ Payment Request Rejected / Expired';
-                        const btn = document.getElementById('markPaidBtn');
-                        if (btn) btn.style.display = 'none';
-                        document.getElementById('newPayBtn').style.display = 'block';
-                        if (feedback) {{
-                            feedback.style.display = 'block';
-                            feedback.style.borderColor = '#dc2626';
-                            feedback.style.color = '#f87171';
-                            feedback.innerHTML = '❌ <b>Request Expired or Rejected</b><br>Tap below to generate a new payment link.';
-                        }}
-                    }}
-                }}
-            }} catch (e) {{}}
-        }}
-
-        async function markPaid() {{
-            if (isProcessing) return;
-            const btn = document.getElementById('markPaidBtn');
-            const feedback = document.getElementById('feedbackBox');
-            
-            btn.innerHTML = '<span class="spinner"></span> Submitting...';
-            btn.disabled = true;
-            isProcessing = true;
-            
-            try {{
-                const res = await fetch('/api/pay_mark_paid/{order.id}', {{
-                    method: 'POST'
-                }});
-                if (res.ok) {{
-                    btn.style.background = '#eab308';
-                    btn.style.color = '#000';
-                    btn.innerHTML = '⏳ Submitted for Verification';
-                    
-                    if (feedback) {{
-                        feedback.style.display = 'block';
-                        feedback.innerHTML = '⏳ <b>Submitted for Verification!</b><br>Admin team notified via Telegram.';
-                    }}
-                    checkStatus();
-                }} else {{
-                    isProcessing = false;
-                    btn.disabled = false;
-                    btn.innerHTML = '✅ I Have Completed Payment';
-                }}
-            }} catch (e) {{
-                isProcessing = false;
-                btn.disabled = false;
-                btn.innerHTML = '✅ I Have Completed Payment';
-            }}
-        }}
-
-        // Poll status every 2 seconds
-        setInterval(checkStatus, 2000);
+        // Fallback to Bot after 2.5 seconds
+        setTimeout(() => {{
+            window.location.href = "{bot_fallback_url}";
+        }}, 2500);
+        
+        // Auto mark as paid behind the scenes just in case they complete it but don't click anything
+        fetch('/api/pay_mark_paid/{order.id}', {{ method: 'POST' }}).catch(() => {{}});
     </script>
 </body>
 </html>"""

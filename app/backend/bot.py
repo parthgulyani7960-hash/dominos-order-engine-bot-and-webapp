@@ -288,9 +288,17 @@ async def answer_callback_query(callback_query_id: str, text: str = None, show_a
     if url:
         payload["url"] = url
     try:
-        await _fast_client.post(tg_url, json=payload)
+        # Telegram API limits text to 200 characters for answerCallbackQuery
+        if text and len(text) > 200:
+            payload["text"] = text[:197] + "..."
+            
+        resp = await _fast_client.post(tg_url, json=payload, timeout=10.0)
+        if resp.status_code != 200:
+            logger.error(f"[answer_callback_query] Failed: {resp.text}")
+            return False
         return True
-    except Exception:
+    except Exception as e:
+        logger.error(f"[answer_callback_query] Exception: {e}")
         return False
 
 async def send_bot_message(telegram_id: str, text: str, reply_markup: dict = None) -> bool:
@@ -1640,10 +1648,13 @@ def render_admin_command_center(db: Session) -> tuple[str, dict]:
             ],
             [
                 {"text": "📢 Broadcast Message", "callback_data": "admin_broadcast_menu"},
-                {"text": "📊 Reports & Backup", "callback_data": "admin_reports_menu"}
+                {"text": "💬 Support Tickets (24h)", "callback_data": "admin_view_support_tickets"}
             ],
             [
-                {"text": "⚠️ View Error Logs", "callback_data": "admin_view_error_logs"},
+                {"text": "📊 Reports & Backup", "callback_data": "admin_reports_menu"},
+                {"text": "⚠️ View Error Logs", "callback_data": "admin_view_error_logs"}
+            ],
+            [
                 {"text": "🗑️ Clear Database (Main Admin)", "callback_data": "admin_clear_db_confirm"}
             ]
         ]
@@ -2673,12 +2684,14 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             session["temp_phone"] = phone_formatted
             session["checkout_pending"] = False
             sync_user_db_session(db, user, session)
+            await send_bot_message(user.telegram_id, "✅ Phone verified.", reply_markup={"remove_keyboard": True})
             await initiate_checkout(db, user, session)
             return
             
         await send_bot_message(
             user.telegram_id,
-            f"✅ <b>Phone updated to <code>{phone_formatted}</code></b>\n\nThis number will be used for all future orders."
+            f"✅ <b>Phone updated to <code>{phone_formatted}</code></b>\n\nThis number will be used for all future orders.",
+            reply_markup={"remove_keyboard": True}
         )
         await display_delivery_location_menu(db, user)
         return
@@ -2992,7 +3005,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             if not is_topup:
                 admin_text += (
                     f"🏡 <b>Address:</b> <code>{order.address}</code>\n"
-                    f"📱 <b>Phone:</b> <code>{order.phone}</code>\n"
+                    f"📱 <b>Phone:</b> {order.phone}\n"
                 )
 
             approve_cb = f"admin_dep_approve_{order.id}" if is_topup else f"admin_order_approve_{order.id}"
@@ -3094,6 +3107,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             if user.phone:
                 session["state"] = None
                 session["checkout_pending"] = False
+                await send_bot_message(user.telegram_id, "✅ Address verified.", reply_markup={"remove_keyboard": True})
                 await initiate_checkout(db, user, session)
                 return
             else:
@@ -4045,6 +4059,43 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             await send_bot_message(order.user.telegram_id, customer_msg)
         except Exception:
             pass
+        return
+    elif session.get("state") == "admin_waiting_db_wipe":
+        if text.strip() == "WIPE DB":
+            try:
+                run_backup(db)
+            except Exception:
+                pass
+            try:
+                from app.backend.database import OrderNote, OrderStatusHistory, OrderItem, UTRAttempt, QRGenerationHistory, RiderAssignment, WalletTransaction, WithdrawalRequest, SavedAddress, Order, SupportMessage, User
+                import os
+                main_admin_id = os.getenv("ADMIN_TELEGRAM_ID", "7958236048").strip()
+                db.query(OrderNote).delete(synchronize_session=False)
+                db.query(OrderStatusHistory).delete(synchronize_session=False)
+                db.query(OrderItem).delete(synchronize_session=False)
+                db.query(UTRAttempt).delete(synchronize_session=False)
+                db.query(QRGenerationHistory).delete(synchronize_session=False)
+                db.query(RiderAssignment).delete(synchronize_session=False)
+                db.query(WalletTransaction).delete(synchronize_session=False)
+                db.query(WithdrawalRequest).delete(synchronize_session=False)
+                db.query(SavedAddress).delete(synchronize_session=False)
+                db.query(Order).delete(synchronize_session=False)
+                db.query(SupportMessage).delete(synchronize_session=False)
+                # Ensure we import ErrorLog
+                from app.backend.database import ErrorLog
+                db.query(ErrorLog).delete(synchronize_session=False)
+                
+                db.query(User).filter(User.telegram_id != str(main_admin_id)).delete(synchronize_session=False)
+                db.commit()
+                auto_save_persistent_db_state(db)
+                session["state"] = None
+                await send_bot_message(user.telegram_id, "✅ <b>Database cleared and reset successfully!</b>", reply_markup=main_keyboard)
+            except Exception as e:
+                db.rollback()
+                await send_bot_message(user.telegram_id, f"❌ Database reset failed: {e}", reply_markup=main_keyboard)
+        else:
+            session["state"] = None
+            await send_bot_message(user.telegram_id, "❌ Verification failed. Database wipe aborted.", reply_markup=main_keyboard)
         return
 
 
@@ -5941,7 +5992,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             f"👤 <b>User:</b> {user.display_name} (ID: <code>{user.telegram_id}</code>)\n"
             f"💰 <b>Total Paid:</b> ₹{order.total_payable:.2f}\n"
             f"🏡 <b>Address:</b> <code>{order.address}</code>\n"
-            f"📱 <b>Phone:</b> <code>{order.phone}</code>\n"
+            f"📱 <b>Phone:</b> {order.phone}\n"
             f"📍 <b>GPS Coordinates:</b> {gps_text}\n\n"
             "👩‍🍳 <b>Actions:</b>"
         )
@@ -6416,17 +6467,18 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             )
             return
 
+        session["state"] = "admin_waiting_db_wipe"
         confirm_text = (
             "⚠️ <b>DANGER ZONE: Clear Platform Database</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Are you sure you want to clear/reset non-admin records in the platform database?\n\n"
-            "• <b>What will be cleared:</b> All orders, wallet transactions, saved addresses, support tickets, and non-admin user records.\n"
-            "• <b>What will be preserved:</b> Admin accounts & system configuration settings.\n\n"
-            "<i>A persistent JSON backup snapshot will be saved prior to resetting. This action cannot be undone!</i>"
+            "Are you sure you want to completely reset the platform database?\n\n"
+            "This will permanently delete all orders, transactions, error logs, support tickets, and users.\n\n"
+            "<b>To proceed, you must type and send the exact phrase:</b>\n"
+            "<code>WIPE DB</code>\n\n"
+            "<i>(Or tap Cancel below to abort)</i>"
         )
         confirm_markup = {
             "inline_keyboard": [
-                [{"text": "🚨 YES, CLEAR DATABASE NOW", "callback_data": "admin_clear_db_execute"}],
                 [{"text": "❌ Cancel & Return to Command Center", "callback_data": "admin_refresh_stats"}]
             ]
         }
@@ -7614,6 +7666,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 f"💰 <b>Total Bill:</b> <b>₹{o.total_payable:.2f}</b> (Paid via: <b>{(o.payment_method or 'wallet').upper()}</b>)\n"
                 f"🏷️ <b>Status:</b> <code>{o.status}</code>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            )
             action_buttons = []
             if o.status == "Pending Verification":
                 action_buttons.append([
@@ -8602,8 +8655,8 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             f"• <b>Amount:</b> <b>₹{amount:.2f}</b>\n\n"
             f"⚡ <b>Direct UPI Payment Link (Prefilled):</b>\n"
             f"👉 <a href=\"{upi_uri}\"><b>📱 Click to Pay ₹{amount:.2f} via GPay / PhonePe / Paytm</b></a>\n\n"
-            f"<i>Tapping the link opens your UPI app with amount ₹{amount:.2f} & Ref <code>{order_id}</code> prefilled automatically!</i>\n\n"
-            f"After completing payment, tap <b>✅ I Have Paid</b> below to submit your request for admin verification."
+            f"<i>Clicking the link will securely open your installed UPI app. The payment amount of ₹{amount:.2f} and Reference ID <code>{order_id}</code> will be prefilled for your convenience.</i>\n\n"
+            f"Once you have successfully transferred the amount, tap the <b>✅ I Have Paid</b> button below so our admin team can verify and credit your wallet."
         )
         
         base_domain = get_mini_app_url(db).rstrip('/')
@@ -8680,6 +8733,19 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             
         if order.status in ["Pending Verification", "Completed", "Approved", "Paid", "Order Processing"]:
             await answer_callback_query(callback_query_id, "⚠️ Payment verification already submitted & awaiting approval!", show_alert=True)
+            conf_text = (
+                f"⏳ <b>Payment Submitted for Verification!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🆔 <b>Order / Deposit ID:</b> <code>{order.id}</code>\n"
+                f"💵 <b>Amount:</b> <b>₹{order.total_payable:.2f}</b>\n\n"
+                f"<i>Our support team will verify your payment and process your request shortly! 🍕</i>"
+            )
+            conf_markup = {
+                "inline_keyboard": [
+                    [{"text": "📞 Contact Support", "callback_data": "support_menu"}]
+                ]
+            }
+            await edit_bot_message(user.telegram_id, message_id, conf_text, reply_markup=conf_markup)
             return
 
         if order.status in ["Cancelled", "Rejected", "Failed"]:
@@ -8858,7 +8924,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 f"Your payment of <b>₹{order.total_payable:.2f}</b> for Order <code>{order_id}</code> has been submitted for admin verification!\n\n"
                 f"🛒 <b>Items Ordered:</b>\n{items_summary}\n\n"
                 f"🏠 <b>Delivery Address:</b> <code>{order.address or 'Saved Address'}</code>\n"
-                f"📱 <b>Phone:</b> <code>{order.phone or 'Saved Phone'}</code>\n\n"
+                f"📱 <b>Phone:</b> {order.phone or 'Saved Phone'}\n\n"
                 f"Our admin team is verifying your payment and will prepare & dispatch your order shortly! You can track status in <b>📦 Track Orders</b>! 🍕"
             )
             pending_markup = {
@@ -9256,7 +9322,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             f"🛒 <b>Items Ordered:</b>\n{items_summary}\n\n"
             f"{financial_summary_text}\n"
             f"🏠 <b>Address:</b> <code>{order.address or 'Saved Address'}</code>\n"
-            f"📱 <b>Phone:</b> <code>{order.phone or 'Saved Phone'}</code>\n"
+            f"📱 <b>Phone:</b> {order.phone or 'Saved Phone'}\n"
             + (f"📝 <b>Note:</b> <i>{order.delivery_instructions}</i>\n" if order.delivery_instructions else "")
             + (f"\n{extra_info}" if extra_info else "")
             + f"\n🕒 <i>Refreshed live at {_ist_now}</i>"
@@ -9266,6 +9332,9 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         if order.rider and order.rider.rider_phone and order.rider.rider_phone != "None":
             r_phone = order.rider.rider_phone.strip()
             buttons.append([{"text": f"📞 Call Rider ({order.rider.rider_name}): {r_phone}", "callback_data": f"track_info_rider_{order_id}"}])
+
+        if getattr(order, "screenshot_url", None):
+            buttons.append([{"text": "📸 View Order Receipt", "callback_data": f"view_receipt_{order_id}"}])
 
         buttons.append([{"text": "💬 Contact Support for this Order", "callback_data": f"support_order_{order_id}"}])
         buttons.append([{"text": "🔄 Refresh Status", "callback_data": f"track_refresh_{order_id}"}])
@@ -9284,6 +9353,18 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await send_bot_message(user.telegram_id, track_text, reply_markup=refresh_markup)
             
         await answer_callback_query(callback_query_id, "Order tracking updated!")
+        return
+
+    elif data.startswith("view_receipt_"):
+        order_id = data.replace("view_receipt_", "").strip()
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order or not getattr(order, "screenshot_url", None) or not order.screenshot_url.startswith("telegram_file:"):
+            await answer_callback_query(callback_query_id, "Receipt not available!", show_alert=True)
+            return
+            
+        file_id = order.screenshot_url.replace("telegram_file:", "")
+        await send_bot_photo(user.telegram_id, file_id, f"🧾 <b>Receipt for Order: {order_id}</b>")
+        await answer_callback_query(callback_query_id)
         return
 
     elif data.startswith("support_order_"):
@@ -9612,15 +9693,15 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             pending_text = (
                 f"📱 <b>Direct Order Payment — UPI QR Code</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"Your order <code>{order_id}</code> is created in ⏳ <b>PENDING PAYMENT</b> status.\n\n"
+                f"Your order <code>{order_id}</code> is created and is in ⏳ <b>PENDING PAYMENT</b> status.\n\n"
                 f"• <b>Order Reference:</b> <code>{ref_id}</code>\n"
                 f"• <b>Total Amount to Pay:</b> <b>₹{pay_amount:.2f}</b>\n"
                 f"• <b>UPI ID:</b> <code>{upi_id}</code>\n"
                 f"⏳ <i>Note: This payment window expires in 10 minutes.</i>\n\n"
                 f"⚡ <b>Direct UPI Payment Link (Prefilled):</b>\n"
                 f"👉 <a href=\"{upi_uri}\"><b>📱 Click to Pay ₹{pay_amount:.2f} via GPay / PhonePe / Paytm</b></a>\n\n"
-                f"<i>Tapping the link opens your phone's UPI app with amount ₹{pay_amount:.2f} & Ref <code>{order_id}</code> prefilled automatically!</i>\n\n"
-                f"After completing transfer, tap <b>✅ I Have Paid / Verify Payment</b> below. Our admin team will verify and dispatch your order immediately! 🍕"
+                f"<i>Clicking the link will securely open your installed UPI app. The payment amount of ₹{pay_amount:.2f} and Reference ID <code>{order_id}</code> will be prefilled for your convenience.</i>\n\n"
+                f"Once you have successfully transferred the amount, tap the <b>✅ I Have Paid / Verify Payment</b> button below so our admin team can verify and dispatch your order! 🍕"
             )
             base_domain = get_mini_app_url(db).rstrip('/')
             pay_link = f"{base_domain}/api/pay_upi/{order_id}"
