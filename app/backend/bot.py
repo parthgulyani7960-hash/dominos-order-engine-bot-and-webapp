@@ -4068,7 +4068,6 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 pass
             try:
                 from app.backend.database import QRGenerationHistory as _QRGenerationHistory
-                import os
                 main_admin_id = os.getenv("ADMIN_TELEGRAM_ID", "7958236048").strip()
                 db.query(OrderNote).delete(synchronize_session=False)
                 db.query(OrderStatusHistory).delete(synchronize_session=False)
