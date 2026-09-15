@@ -7526,10 +7526,18 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 f"🏷️ <b>Status:</b> <code>{o.status}</code>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             )
-            buttons.append([
-                {"text": f"✅ Complete ({o.id[-6:]})", "callback_data": f"admin_act_complete_{o.id}"},
-                {"text": f"❌ Reject ({o.id[-6:]})", "callback_data": f"admin_act_reject_{o.id}"}
-            ])
+            action_buttons = []
+            if o.status == "Pending Verification":
+                action_buttons.append([
+                    {"text": f"✅ Approve Deposit/Order", "callback_data": f"admin_dep_approve_{o.id}" if o.id.startswith("TOPUP-") else f"admin_act_approve_{o.id}"},
+                    {"text": f"❌ Reject", "callback_data": f"admin_dep_reject_{o.id}" if o.id.startswith("TOPUP-") else f"admin_act_reject_{o.id}"}
+                ])
+            else:
+                action_buttons.append([
+                    {"text": f"✅ Complete ({o.id[-6:]})", "callback_data": f"admin_act_complete_{o.id}"},
+                    {"text": f"❌ Reject ({o.id[-6:]})", "callback_data": f"admin_act_reject_{o.id}"}
+                ])
+            buttons.extend(action_buttons)
         buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
         await answer_callback_query(callback_query_id)
@@ -7565,6 +7573,10 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         if not order:
             await answer_callback_query(callback_query_id, "Order not found!")
             return
+        if order.status in ["Completed", "Approved", "Paid", "Order Processing"]:
+            await answer_callback_query(callback_query_id, "Already approved!", show_alert=True)
+            return
+            
         order.status = "Paid"
         h = OrderStatusHistory(order_id=order.id, status="Paid", note="Approved manually via Telegram Bot admin panel")
         db.add(h)
@@ -7602,11 +7614,19 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 f"💰 <b>Total Bill:</b> <b>₹{o.total_payable:.2f}</b> (Paid via: <b>{(o.payment_method or 'wallet').upper()}</b>)\n"
                 f"🏷️ <b>Status:</b> <code>{o.status}</code>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            )
-            buttons.append([
-                {"text": f"✅ Complete ({o.id[-6:]})", "callback_data": f"admin_act_complete_{o.id}"},
-                {"text": f"❌ Reject ({o.id[-6:]})", "callback_data": f"admin_act_reject_{o.id}"}
-            ])
+            action_buttons = []
+            if o.status == "Pending Verification":
+                action_buttons.append([
+                    {"text": f"✅ Approve Deposit/Order", "callback_data": f"admin_dep_approve_{o.id}" if o.id.startswith("TOPUP-") else f"admin_act_approve_{o.id}"},
+                    {"text": f"❌ Reject", "callback_data": f"admin_dep_reject_{o.id}" if o.id.startswith("TOPUP-") else f"admin_act_reject_{o.id}"}
+                ])
+            else:
+                action_buttons.append([
+                    {"text": f"✅ Complete ({o.id[-6:]})", "callback_data": f"admin_act_complete_{o.id}"},
+                    {"text": f"❌ Reject ({o.id[-6:]})", "callback_data": f"admin_act_reject_{o.id}"}
+                ])
+            buttons.extend(action_buttons)
+            
         buttons.append([{"text": "🔙 Back to Control Center", "callback_data": "admin_refresh_stats"}])
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
         return
