@@ -213,61 +213,6 @@ bot.sse_broadcast_callback = None
 notification_service.send_bot_message_func = bot.send_bot_message
 notification_service.send_bot_photo_func = bot.send_bot_photo
 notification_service.sse_broadcast_func = None
-notification_service.ws_broadcast_func = None
-
-
-
-# --- Database Seeding ---
-
-def seed_database():
-    db = SessionLocal()
-    try:
-        # Clean up any previously seeded mock pizzas to ensure database has only 100% real menu items from Domino's site
-        db.query(Product).filter(
-            Product.name.in_([
-                "Margherita Classic",
-                "Pepperoni Feast",
-                "Garden Veggie Supreme",
-                "BBQ Smoked Chicken",
-                "Double Cheese Romano",
-                "Cheeseburst Margherita",
-                "Tomato Onion Pizza Mania",
-                "Golden Corn Pizza Mania",
-                "Truffle Mushroom Artisan",
-                "Cheeseburst Margherita (Medium)"
-            ])
-        ).delete(synchronize_session=False)
-        db.commit()
-
-        DOMINOS_MENU_CATALOG = [
-            # --- PIZZA MANIA ---
-            {
-                "name": "Classic Pizza Mania (Tomato)",
-                "price": 49.0,
-                "description": "Tangy tomato sauce with 100% mozzarella cheese",
-                "is_veg": True,
-                "category": "Mania",
-                "crust_options": ["Classic Hand Tossed"],
-                "size_options": ["Regular"]
-            },
-            {
-                "name": "Onion Pizza Mania",
-                "price": 69.0,
-                "description": "Crunchy onion topping with mozzarella cheese",
-                "is_veg": True,
-                "category": "Mania",
-                "crust_options": ["Classic Hand Tossed"],
-                "size_options": ["Regular"]
-            },
-            {
-                "name": "Golden Corn Pizza Mania",
-                "price": 79.0,
-                "description": "Juicy sweet corn with mozzarella cheese",
-                "is_veg": True,
-                "category": "Mania",
-                "crust_options": ["Classic Hand Tossed"],
-                "size_options": ["Regular"]
-            },
             {
                 "name": "Capsicum & Red Paprika Pizza Mania",
                 "price": 89.0,

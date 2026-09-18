@@ -4130,23 +4130,15 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
             except Exception:
                 pass
             try:
-                from app.backend.database import QRGenerationHistory as _QRGenerationHistory
-                main_admin_id = os.getenv("ADMIN_TELEGRAM_ID", "7958236048").strip()
-                db.query(OrderNote).delete(synchronize_session=False)
-                db.query(OrderStatusHistory).delete(synchronize_session=False)
-                db.query(OrderItem).delete(synchronize_session=False)
-                db.query(UTRAttempt).delete(synchronize_session=False)
-                db.query(_QRGenerationHistory).delete(synchronize_session=False)
-                db.query(RiderAssignment).delete(synchronize_session=False)
-                db.query(WalletTransaction).delete(synchronize_session=False)
-                db.query(WithdrawalRequest).delete(synchronize_session=False)
-                db.query(SavedAddress).delete(synchronize_session=False)
-                db.query(Order).delete(synchronize_session=False)
-                db.query(SupportMessage).delete(synchronize_session=False)
-                db.query(ErrorLog).delete(synchronize_session=False)
+                from app.backend.database import engine, Base
                 
-                db.query(User).filter(User.telegram_id != str(main_admin_id)).delete(synchronize_session=False)
+                # Delete all records from all tables to guarantee complete platform wipe
+                with engine.begin() as conn:
+                    for table in reversed(Base.metadata.sorted_tables):
+                        conn.execute(table.delete())
+                
                 db.commit()
+                USER_BOT_SESSION.clear()
                 auto_save_persistent_db_state(db)
                 session["state"] = None
                 await send_bot_message(user.telegram_id, "✅ <b>Database cleared and reset successfully!</b>", reply_markup=main_keyboard)
@@ -4570,8 +4562,7 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
         await send_bot_message(
             user.telegram_id,
             f"🏠 <b>Enter Your Delivery Address</b>\n\n"
-            f"Please type your full delivery address and press send.{coord_info}\n\n"
-            f"<i>Example: Flat 4B, Sunrise Apartments, MG Road, Bengaluru 560001</i>",
+            f"Please type your full delivery address and press send.{coord_info}\n",
             reply_markup={"keyboard": [[{"text": "🔙 Back"}]], "resize_keyboard": True, "one_time_keyboard": True}
         )
         return
