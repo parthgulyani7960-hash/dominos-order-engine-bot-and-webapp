@@ -564,15 +564,16 @@ def render_admin_order_notification_card(db: Session, order: Order, action_mode:
         else:
             wallet_warning = f"   • Wallet Check: 🟢 Sufficient (Bal: ₹{user_wallet:.2f})\n"
 
+    is_topup = order.id.startswith("TOPUP-")
     # Headers and Statuses
     if action_mode == "approved":
-        header_title = "✅ <b>ORDER APPROVED & DISPATCHED BY ADMIN</b>"
-        status_badge = "🟢 Order Processing / Dispatched"
+        header_title = f"✅ <b>{'DEPOSIT APPROVED' if is_topup else 'ORDER APPROVED & DISPATCHED BY ADMIN'}</b>"
+        status_badge = f"🟢 {'Deposit Approved' if is_topup else 'Order Processing / Dispatched'}"
     elif action_mode == "rejected":
-        header_title = "❌ <b>ORDER REJECTED & CANCELLED BY ADMIN</b>"
-        status_badge = "🔴 Cancelled / Refunded"
+        header_title = f"❌ <b>{'DEPOSIT REJECTED' if is_topup else 'ORDER REJECTED & CANCELLED BY ADMIN'}</b>"
+        status_badge = f"🔴 {'Deposit Rejected' if is_topup else 'Cancelled / Refunded'}"
     else:
-        header_title = "🔔 <b>NEW PIZZA ORDER FOR ADMIN APPROVAL</b>"
+        header_title = f"🔔 <b>{'NEW WALLET DEPOSIT REQUEST' if is_topup else 'NEW PIZZA ORDER FOR ADMIN APPROVAL'}</b>"
         status_badge = f"⏳ {order.status}"
 
     created_time = order.created_at.strftime("%d-%m-%Y %I:%M %p IST") if order.created_at else "Now"
@@ -580,7 +581,7 @@ def render_admin_order_notification_card(db: Session, order: Order, action_mode:
     card_text = (
         f"{header_title}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🆔 <b>Order ID:</b> <code>{order.id}</code>\n"
+        f"🆔 <b>{'Deposit ID' if is_topup else 'Order ID'}:</b> <code>{order.id}</code>\n"
         f"📅 <b>Placed At:</b> <code>{created_time}</code>\n"
         f"🏷️ <b>Current Status:</b> <b>{status_badge}</b>\n\n"
         f"👤 <b>CUSTOMER PROFILE:</b>\n"
@@ -588,23 +589,22 @@ def render_admin_order_notification_card(db: Session, order: Order, action_mode:
         f"   • <b>Telegram ID:</b> <code>{user_tg}</code>\n"
         f"   • <b>Wallet Balance:</b> <b>₹{user_wallet:.2f}</b>\n"
         f"   • <b>Contact Phone:</b> {phone_link}\n\n"
-        f"🛒 <b>ORDERED ITEMS:</b>\n{items_summary}\n\n"
-        + (f"📝 <b>Delivery Instructions:</b> <i>{escape_html(order.delivery_instructions)}</i>\n\n" if order.delivery_instructions else "") +
+        + (f"🛒 <b>ORDERED ITEMS:</b>\n{items_summary}\n\n" if not is_topup else "")
+        + (f"📝 <b>Delivery Instructions:</b> <i>{escape_html(order.delivery_instructions)}</i>\n\n" if order.delivery_instructions and not is_topup else "") +
         f"💰 <b>FINANCIAL SUMMARY:</b>\n"
         f"   • Subtotal: ₹{subtotal:.2f}\n"
-        + (f"   • Service Fee: ₹{bot_fee:.2f}\n" if bot_fee > 0 else "")
-        + (f"   • Promo Discount: -₹{discount_val:.2f}\n" if discount_val > 0 else "") +
-        f"   • Grand Total: <b>₹{order.total_payable:.2f}</b>\n"
+        + (f"   • Service Fee: ₹{bot_fee:.2f}\n" if bot_fee > 0 and not is_topup else "")
+        + (f"   • Promo Discount: -₹{discount_val:.2f}\n" if discount_val > 0 and not is_topup else "") +
+        f"   • {'Deposit Amount' if is_topup else 'Grand Total'}: <b>₹{order.total_payable:.2f}</b>\n"
         f"   • Payment Method: <b>{payment_method}</b>\n"
         + (f"   • Wallet Deducted: ₹{wallet_applied:.2f}\n" if wallet_applied > 0 else "")
         + (f"   • UPI/Cash Due: ₹{upi_payable:.2f}\n" if upi_payable > 0 else "") +
         f"   • Transaction / UTR Ref: <code>{utr_val}</code>\n"
         + wallet_warning +
-        f"\n🏡 <b>DELIVERY ADDRESS:</b>\n"
-        f"<code>{order.address or 'Address pending'}</code>\n\n"
-        f"🏪 <b>FULFILLMENT DATA:</b>\n"
+        (f"\n🏡 <b>DELIVERY ADDRESS:</b>\n<code>{order.address or 'Address pending'}</code>\n\n" if not is_topup else "\n") +
+        (f"🏪 <b>FULFILLMENT DATA:</b>\n"
         f"   • Sector Store: <code>{order.sector_store or 'Pending'}</code>\n"
-        f"   • Domino's Ref: <code>{order.dominos_reference or 'Pending'}</code>\n"
+        f"   • Domino's Ref: <code>{order.dominos_reference or 'Pending'}</code>\n" if not is_topup else "")
     )
 
     # Keyboards
@@ -620,12 +620,15 @@ def render_admin_order_notification_card(db: Session, order: Order, action_mode:
             "inline_keyboard": [
                 [{"text": "📍 Open Google Maps Location", "url": maps_url}],
                 [
-                    {"text": "✅ Approve & Dispatch Order", "callback_data": f"admin_approve_direct_order_{order.id}"},
-                    {"text": "❌ Reject & Refund", "callback_data": f"admin_reject_direct_order_{order.id}"}
+                    {"text": f"✅ Approve {'Deposit' if is_topup else '& Dispatch Order'}", "callback_data": f"admin_dep_approve_{order.id}" if is_topup else f"admin_approve_direct_order_{order.id}"},
+                    {"text": f"❌ Reject {'Deposit' if is_topup else '& Refund'}", "callback_data": f"admin_dep_reject_{order.id}" if is_topup else f"admin_reject_direct_order_{order.id}"}
                 ],
                 [
-                    {"text": "💬 Reply to Customer", "callback_data": f"admin_reply_support_{user_tg}"},
-                    {"text": "✏️ Domino's Ref", "callback_data": f"admin_edit_ref_{order.id}"}
+                    {"text": "💬 Reply to Customer", "callback_data": f"admin_reply_support_{user_tg}"}
+                ] + ([{"text": "✏️ Domino's Ref", "callback_data": f"admin_edit_ref_{order.id}"}] if not is_topup else []),
+                [
+                    {"text": "💬 Tpl: Delay", "callback_data": f"admin_tpl_delay_{order.id}"},
+                    {"text": "💬 Tpl: Pay Pending", "callback_data": f"admin_tpl_nopay_{order.id}"}
                 ]
             ]
         }
@@ -654,31 +657,46 @@ async def send_admin_order_details(telegram_id: str, order_id: str, db: Session,
         clean_addr = urllib.parse.quote(order.address or (order.user.address if order.user else "India"))
         maps_url = f"https://www.google.com/maps/search/?api=1&query={clean_addr}"
 
+    is_topup = order.id.startswith("TOPUP-")
     buttons = [
         [
             {"text": "📍 Open Google Maps Location", "url": maps_url}
         ],
         [
-            {"text": "✅ Approve & Dispatch", "callback_data": f"admin_approve_direct_order_{order.id}"},
-            {"text": "❌ Reject & Refund", "callback_data": f"admin_reject_direct_order_{order.id}"}
-        ],
-        [
-            {"text": "✏️ Domino's Ref", "callback_data": f"admin_edit_ref_{order.id}"},
-            {"text": "✏️ Sector Store", "callback_data": f"admin_edit_store_{order.id}"}
-        ],
-        [
-            {"text": "✏️ Rider Name", "callback_data": f"admin_edit_rider_name_{order.id}"},
-            {"text": "✏️ Rider Phone", "callback_data": f"admin_edit_rider_phone_{order.id}"}
-        ],
-        [
-            {"text": "🖼️ Attach Screenshot", "callback_data": f"admin_order_attach_sc_{order.id}"},
-            {"text": "✂️ Partial Item Cancel", "callback_data": f"admin_item_cancel_menu_{order.id}"}
-        ],
-        [
-            {"text": "🔄 Change Status", "callback_data": f"admin_change_status_menu_{order.id}"},
-            {"text": "🔙 Back", "callback_data": "admin_view_pending_deposits" if order.id.startswith("TOPUP-") else "admin_view_pending_orders"}
+            {"text": f"✅ Approve {'Deposit' if is_topup else '& Dispatch'}", "callback_data": f"admin_dep_approve_{order.id}" if is_topup else f"admin_approve_direct_order_{order.id}"},
+            {"text": f"❌ Reject {'Deposit' if is_topup else '& Refund'}", "callback_data": f"admin_dep_reject_{order.id}" if is_topup else f"admin_reject_direct_order_{order.id}"}
         ]
     ]
+    if not is_topup:
+        buttons.extend([
+            [
+                {"text": "✏️ Domino's Ref", "callback_data": f"admin_edit_ref_{order.id}"},
+                {"text": "✏️ Sector Store", "callback_data": f"admin_edit_store_{order.id}"}
+            ],
+            [
+                {"text": "✏️ Rider Name", "callback_data": f"admin_edit_rider_name_{order.id}"},
+                {"text": "✏️ Rider Phone", "callback_data": f"admin_edit_rider_phone_{order.id}"}
+            ],
+            [
+                {"text": "🖼️ Attach Screenshot", "callback_data": f"admin_order_attach_sc_{order.id}"},
+                {"text": "✂️ Partial Item Cancel", "callback_data": f"admin_item_cancel_menu_{order.id}"}
+            ]
+        ])
+    else:
+        buttons.append([
+            {"text": "🖼️ Attach Screenshot", "callback_data": f"admin_order_attach_sc_{order.id}"}
+        ])
+
+    buttons.extend([
+        [
+            {"text": "🔄 Change Status", "callback_data": f"admin_change_status_menu_{order.id}"},
+            {"text": "🔙 Back", "callback_data": "admin_view_pending_deposits" if is_topup else "admin_view_pending_orders"}
+        ],
+        [
+            {"text": "💬 Tpl: Delay", "callback_data": f"admin_tpl_delay_{order.id}"},
+            {"text": "💬 Tpl: Pay Pending", "callback_data": f"admin_tpl_nopay_{order.id}"}
+        ]
+    ])
     
     if order.screenshot_url:
         buttons.insert(4, [
@@ -2029,7 +2047,12 @@ def sync_user_db_session(db: Session, user: User, session: dict):
     try:
         import json
         user.bot_state = session.get("state")
-        user.bot_cart = json.dumps(session.get("cart", {}))
+        dump_data = {
+            "cart": session.get("cart", {}),
+            "temp_address": session.get("temp_address"),
+            "temp_phone": session.get("temp_phone")
+        }
+        user.bot_cart = json.dumps(dump_data)
         db.commit()
         from .database import auto_save_persistent_db_state
         auto_save_persistent_db_state(db)
@@ -2105,18 +2128,27 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
     asyncio.create_task(sync_user_profile_photo(str(telegram_id), str(user.id)))
 
     # Restore or sync session state live from DB
-    import json
     saved_cart = {}
+    temp_address = None
+    temp_phone = None
     if user.bot_cart:
         try:
-            saved_cart = json.loads(user.bot_cart)
+            parsed = json.loads(user.bot_cart)
+            if isinstance(parsed, dict) and "cart" in parsed:
+                saved_cart = parsed.get("cart", {})
+                temp_address = parsed.get("temp_address")
+                temp_phone = parsed.get("temp_phone")
+            else:
+                saved_cart = parsed
         except Exception:
             pass
 
     if str(telegram_id) not in USER_BOT_SESSION:
         USER_BOT_SESSION[str(telegram_id)] = {
             "state": user.bot_state,
-            "cart": saved_cart
+            "cart": saved_cart,
+            "temp_address": temp_address,
+            "temp_phone": temp_phone
         }
     else:
         session = USER_BOT_SESSION[str(telegram_id)]
@@ -5279,16 +5311,26 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
     # Restore or sync session state live from DB
     import json
     saved_cart = {}
+    temp_address = None
+    temp_phone = None
     if user.bot_cart:
         try:
-            saved_cart = json.loads(user.bot_cart)
+            parsed = json.loads(user.bot_cart)
+            if isinstance(parsed, dict) and "cart" in parsed:
+                saved_cart = parsed.get("cart", {})
+                temp_address = parsed.get("temp_address")
+                temp_phone = parsed.get("temp_phone")
+            else:
+                saved_cart = parsed
         except Exception:
             pass
 
     if str(telegram_id) not in USER_BOT_SESSION:
         USER_BOT_SESSION[str(telegram_id)] = {
             "state": user.bot_state,
-            "cart": saved_cart
+            "cart": saved_cart,
+            "temp_address": temp_address,
+            "temp_phone": temp_phone
         }
     else:
         session = USER_BOT_SESSION[str(telegram_id)]
@@ -7039,20 +7081,18 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id, "No message found!")
             return
             
-        all_users = db.query(DbUser).filter(DbUser.telegram_id.isnot(None)).all()
+        all_user_tg_ids = [u.telegram_id for u in db.query(DbUser).filter(DbUser.telegram_id.isnot(None)).all() if u.telegram_id]
         
-        async def run_broadcast(users, text, admin_id, m_id):
+        async def run_broadcast(tg_ids, text, admin_id, m_id):
             sent_count = 0
             fail_count = 0
-            for target_u in users:
-                if target_u.telegram_id:
-                    import asyncio
-                    ok = await send_bot_message(target_u.telegram_id, f"📢 <b>Announcement from Admin:</b>\n\n{text}")
-                    if ok:
-                        sent_count += 1
-                    else:
-                        fail_count += 1
-                    await asyncio.sleep(0.05) # Rate limit safety
+            for target_tg_id in tg_ids:
+                ok = await send_bot_message(target_tg_id, f"📢 <b>Announcement from Admin:</b>\n\n{text}")
+                if ok:
+                    sent_count += 1
+                else:
+                    fail_count += 1
+                await asyncio.sleep(0.05) # Rate limit safety
             report_msg = (
                 f"✅ <b>Broadcast Completed!</b>\n\n"
                 f"• <b>Sent Successfully:</b> {sent_count} users\n"
@@ -7060,8 +7100,7 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             )
             await edit_bot_message(admin_id, m_id, report_msg, reply_markup={"inline_keyboard": [[{"text": "🔙 Back", "callback_data": "admin_refresh_stats"}]]})
             
-        import asyncio
-        asyncio.create_task(run_broadcast(all_users, broadcast_text, user.telegram_id, message_id))
+        asyncio.create_task(run_broadcast(all_user_tg_ids, broadcast_text, user.telegram_id, message_id))
         
         session["state"] = None
         session["temp_broadcast_text"] = None
@@ -7482,6 +7521,36 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             reply_markup=cancel_keyboard
         )
         await answer_callback_query(callback_query_id)
+        return
+    elif data.startswith("admin_tpl_delay_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        order_id = data.replace("admin_tpl_delay_", "").strip()
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order or not order.user:
+            await answer_callback_query(callback_query_id, "Order/User not found!")
+            return
+        
+        msg = f"⏳ <b>Order Status Update</b>\n\nDear {escape_html(order.user.display_name or order.user.username or 'Customer')},\nThere is a slight delay with your order <code>{order.id}</code> due to high volume. We are working on it and will update you shortly! Thank you for your patience."
+        await send_bot_message(order.user.telegram_id, msg)
+        await answer_callback_query(callback_query_id, "Delay template sent to user!", show_alert=True)
+        return
+
+    elif data.startswith("admin_tpl_nopay_"):
+        if not is_admin:
+            await answer_callback_query(callback_query_id, "Unauthorized!")
+            return
+        order_id = data.replace("admin_tpl_nopay_", "").strip()
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order or not order.user:
+            await answer_callback_query(callback_query_id, "Order/User not found!")
+            return
+        
+        is_topup = order.id.startswith("TOPUP-")
+        msg = f"⚠️ <b>Payment Verification Pending</b>\n\nDear {escape_html(order.user.display_name or order.user.username or 'Customer')},\nWe have not yet received or verified the payment for your {'deposit request' if is_topup else 'order'} <code>{order.id}</code>. Please ensure you have completed the payment and submitted the correct UTR/Reference number."
+        await send_bot_message(order.user.telegram_id, msg)
+        await answer_callback_query(callback_query_id, "Payment pending template sent to user!", show_alert=True)
         return
 
     elif data.startswith("admin_change_status_menu_"):
@@ -9779,7 +9848,11 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         item_names = []
         for key_str, qty in list(cart.items()):
             item_type, obj, item_name, unit_price, items_breakdown = resolve_cart_item(db, key_str)
-            item_names.append(f"• {item_name} x{qty}")
+            base_str = f"• {item_name} x{qty}"
+            if items_breakdown:
+                breakdown_str = "\n".join([f"  ↳ {b}" for b in items_breakdown])
+                base_str += f"\n{breakdown_str}"
+            item_names.append(base_str)
         items_summary = "\n".join(item_names)
         
         discount_text = f"₹{discount:.2f}" if discount > 0 else "None"
@@ -10037,7 +10110,12 @@ async def process_bot_callback_task(telegram_id: str, first_name: str, last_name
                 import json
                 session = USER_BOT_SESSION[str(telegram_id)]
                 user.bot_state = session.get("state")
-                user.bot_cart = json.dumps(session.get("cart", {}))
+                dump_data = {
+                    "cart": session.get("cart", {}),
+                    "temp_address": session.get("temp_address"),
+                    "temp_phone": session.get("temp_phone")
+                }
+                user.bot_cart = json.dumps(dump_data)
                 db.commit()
                 
             # Acknowledge callback at the end to stop spinner (fails silently if already answered)

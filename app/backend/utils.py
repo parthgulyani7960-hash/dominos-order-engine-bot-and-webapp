@@ -298,25 +298,42 @@ def generate_upi_qr_details(upi_id: str, upi_name: str, amount: float, ref_id: s
     # Construct NPCI Standard UPI Deep Link URI
     upi_uri = f"upi://pay?pa={clean_id}&pn={enc_name}&am={amt_str}&cu=INR&tr={clean_ref}&tn={enc_note}"
     
-    # 1. Generate local high-res 400x400 PNG with 4-module white quiet zone border & medium ECC
+    import os
+    from PIL import Image
+
+    # 1. Generate local high-res 400x400 PNG with 4-module white quiet zone border & HIGH ECC (for logo overlay)
     qr = qrcode.QRCode(
-        version=None,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        version=5,
+        error_correction=qrcode.constants.ERROR_CORRECT_H,
         box_size=10,
         border=4,  # Standard quiet zone margin required for phone cameras
     )
     qr.add_data(upi_uri)
     qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # Use Domino's Blue for QR code color
+    img = qr.make_image(fill_color="#0055A5", back_color="white").convert('RGBA')
+    
+    logo_path = os.path.join(os.path.dirname(__file__), 'static', 'logo.png')
+    if os.path.exists(logo_path):
+        logo = Image.open(logo_path).convert("RGBA")
+        qr_width, qr_height = img.size
+        # Make logo 25% of QR code width
+        logo_size = int(qr_width * 0.25)
+        logo = logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
+        
+        # Paste logo using alpha channel as mask in the exact center
+        pos = ((qr_width - logo_size) // 2, (qr_height - logo_size) // 2)
+        img.paste(logo, pos, logo)
     
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     b64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
     qr_data_url = f"data:image/png;base64,{b64_str}"
     
-    # 2. External API fallback URL with quiet zone margin (margin=4) and high error correction (ecc=M)
+    # 2. External API fallback URL with quiet zone margin (margin=4) and high error correction (ecc=H) and color
     encoded_uri_for_api = urllib.parse.quote(upi_uri, safe='')
-    qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&ecc=M&margin=4&data={encoded_uri_for_api}"
+    qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&ecc=H&margin=4&color=0055A5&data={encoded_uri_for_api}"
     
     return {
         "upi_id": clean_id,

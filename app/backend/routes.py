@@ -66,8 +66,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
         user = db.query(User).filter(User.role == "admin").first()
     else:
         user = db.query(User).filter(or_(User.id == sub, User.telegram_id == sub)).first()
-        if not user and sub.isdigit():
-            user = db.query(User).filter(User.id == int(sub)).first()
+
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     
@@ -1195,7 +1194,7 @@ async def redirect_to_upi_app(order_id: str, db: Session = Depends(get_db)):
     upi_id = sys_upi.value if sys_upi and sys_upi.value else "pranjalottery@fam"
     upi_name = sys_name.value if sys_name and sys_name.value else "Domino's Order Engine"
     
-    pay_amt = order.total_payable
+    pay_amt = float(order.upi_paid) if getattr(order, "upi_paid", 0) > 0 else float(order.total_payable)
     note_str = f"Deposit {order.id}" if order.id.startswith("TOPUP-") else f"Order {order.id}"
     
     encoded_name = urllib.parse.quote(upi_name)
