@@ -8828,11 +8828,16 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                     bg_db.commit()
                     
                     expired_text = (
-                        f"❌ <b>Payment Link Expired</b>\n\n"
-                        f"The payment request for <b>₹{ord_obj.total_payable:.2f}</b> (Ref: <code>{oid}</code>) has expired.\n"
-                        f"Please request a new deposit if you still wish to add funds."
+                        f"❌ <b>Deposit Topup Request Cancelled</b>\n\n"
+                        f"The deposit request for <b>₹{ord_obj.total_payable:.2f}</b> (Ref: <code>{oid}</code>) was automatically cancelled due to timeout.\n\n"
+                        f"<i>If you have already paid, you can contact support directly using the button below.</i>"
                     )
-                    await edit_bot_message(tg_id, msg_id, expired_text, reply_markup=None)
+                    support_markup = {
+                        "inline_keyboard": [
+                            [{"text": "📞 Contact Support", "callback_data": "support_menu"}]
+                        ]
+                    }
+                    await edit_bot_message(tg_id, msg_id, expired_text, reply_markup=support_markup)
             except Exception as e:
                 logger.error(f"Error in automatic payment expiry: {e}")
             finally:
