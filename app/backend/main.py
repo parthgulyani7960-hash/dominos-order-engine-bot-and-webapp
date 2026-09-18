@@ -69,7 +69,8 @@ async def lifespan(app: FastAPI):
     """Manages application startup and graceful shutdown."""
     # ── Startup ──────────────────────────────────────────────────────────────
     init_db()
-    seed_database()
+    # Database seeding has been disabled as per administrative requirement
+    # to ensure "WIPE DB" leaves the platform completely blank and data is not recovered.
     _bg_tasks: list[asyncio.Task] = [
         asyncio.create_task(run_bot_polling(), name="bot_polling"),
         asyncio.create_task(schedule_daily_backup(), name="daily_backup"),
