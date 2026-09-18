@@ -6885,12 +6885,26 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         await answer_callback_query(callback_query_id, "Disabled by Security Policy!")
         return
 
-    elif data == "admin_view_error_logs":
+    elif data == "admin_view_error_logs" or data.startswith("admin_error_logs_page_"):
         if not is_admin:
             await answer_callback_query(callback_query_id, "Unauthorized!")
             return
-        logs = db.query(ErrorLog).order_by(ErrorLog.created_at.desc()).limit(10).all()
-        if not logs:
+            
+        page = 1
+        if data.startswith("admin_error_logs_page_"):
+            try:
+                page = int(data.split("_")[-1])
+            except Exception:
+                page = 1
+                
+        limit = 5
+        offset = (page - 1) * limit
+        total_logs = db.query(ErrorLog).count()
+        total_pages = (total_logs + limit - 1) // limit if total_logs > 0 else 1
+        page = max(1, min(page, total_pages))
+        
+        logs = db.query(ErrorLog).order_by(ErrorLog.created_at.desc()).offset(offset).limit(limit).all()
+        if not logs and page == 1:
             await edit_bot_message(
                 user.telegram_id,
                 message_id,
@@ -6900,15 +6914,24 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
             await answer_callback_query(callback_query_id)
             return
             
-        msg = "⚠️ <b>System Exception & Error Logs (Latest 10):</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        msg = f"⚠️ <b>System Exception & Error Logs (Page {page}/{total_pages}):</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         for l in logs:
             date_str = l.created_at.strftime("%d %b %H:%M:%S") if l.created_at else "—"
             msg += f"• <b>[{date_str}]</b> [Type: <code>{l.type}</code>]\n<code>{escape_html((l.message or '')[:250])}</code>\n\n"
             
-        buttons = [
-            [{"text": "🧹 Clear Error Logs", "callback_data": "admin_clear_error_logs"}],
-            [{"text": "🔄 Refresh Logs", "callback_data": "admin_view_error_logs"}, {"text": "🔙 Back", "callback_data": "admin_refresh_stats"}]
-        ]
+        nav_row = []
+        if page > 1:
+            nav_row.append({"text": "⬅️ Prev", "callback_data": f"admin_error_logs_page_{page-1}"})
+        if page < total_pages:
+            nav_row.append({"text": "Next ➡️", "callback_data": f"admin_error_logs_page_{page+1}"})
+            
+        buttons = []
+        if nav_row:
+            buttons.append(nav_row)
+        
+        buttons.append([{"text": "🧹 Clear Error Logs", "callback_data": "admin_clear_error_logs"}])
+        buttons.append([{"text": "🔄 Refresh", "callback_data": f"admin_error_logs_page_{page}"}, {"text": "🔙 Back", "callback_data": "admin_refresh_stats"}])
+        
         await edit_bot_message(user.telegram_id, message_id, msg, reply_markup={"inline_keyboard": buttons})
         await answer_callback_query(callback_query_id)
         return
