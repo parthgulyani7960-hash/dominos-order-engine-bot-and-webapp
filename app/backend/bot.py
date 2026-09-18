@@ -8750,13 +8750,11 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         
         payment_text = (
             f"💳 <b>Deposit Payment Request</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"• <b>Ref ID:</b> <code>{order_id}</code>\n"
             f"• <b>Amount:</b> <b>₹{amount:.2f}</b>\n\n"
-            f"⚡ <b>Direct UPI Payment Link (Prefilled):</b>\n"
-            f"👉 <a href=\"{upi_uri}\"><b>📱 Click to Pay ₹{amount:.2f} via GPay / PhonePe / Paytm</b></a>\n\n"
-            f"<i>Clicking the link will securely open your installed UPI app. The payment amount of ₹{amount:.2f} and Reference ID <code>{order_id}</code> will be prefilled for your convenience.</i>\n\n"
-            f"Once you have successfully transferred the amount, tap the <b>✅ I Have Paid</b> button below so our admin team can verify and credit your wallet."
+            f"👉 <a href=\"{upi_uri}\"><b>📱 Click to Pay via UPI App</b></a>\n\n"
+            f"<i>After transferring the amount, tap the <b>✅ I Have Paid</b> button below for admin verification.</i>"
         )
         
         base_domain = get_mini_app_url(db).rstrip('/')
@@ -8946,14 +8944,12 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
         qr_data_url = upi_details.get("qr_data_url", "")
         
         pending_text = (
-            f"📱 <b>Direct Order Payment — Fresh UPI QR Code</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"Your fresh payment QR for order <code>{order.id}</code> is ready.\n\n"
-            f"• <b>Total Amount to Pay:</b> <b>₹{pay_amount:.2f}</b>\n"
-            f"• <b>UPI ID:</b> <code>{upi_id}</code>\n"
-            f"⏳ <i>Note: This QR payment window expires in 10 minutes.</i>\n\n"
-            f"👉 <a href=\"{upi_uri}\"><b>📱 Click Here to Pay ₹{pay_amount:.2f} via UPI App</b></a> or scan the QR code above.\n\n"
-            f"After completing the transfer, tap <b>✅ I Have Paid / Verify Payment</b> below."
+            f"📱 <b>Fresh QR Code Ready</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"• <b>Order ID:</b> <code>{order.id}</code>\n"
+            f"• <b>Amount:</b> <b>₹{pay_amount:.2f}</b>\n\n"
+            f"👉 <a href=\"{upi_uri}\"><b>📱 Click to Pay via UPI App</b></a>\n\n"
+            f"<i>After transferring the amount, tap the <b>✅ I Have Paid</b> button below for verification.</i>"
         )
         pending_markup = {
             "inline_keyboard": [
@@ -9797,17 +9793,12 @@ async def handle_bot_callback(db: Session, telegram_id: str, first_name: str, la
                 breakdown_text += f"• <b>Amount to Pay:</b> <b>₹{pay_amount:.2f}</b>\n"
 
             pending_text = (
-                f"📱 <b>Direct Order Payment — UPI QR Code</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"Your order <code>{order_id}</code> is created and is in ⏳ <b>PENDING PAYMENT</b> status.\n\n"
-                f"• <b>Order Reference:</b> <code>{ref_id}</code>\n"
-                f"{breakdown_text}"
-                f"• <b>UPI ID:</b> <code>{upi_id}</code>\n"
-                f"⏳ <i>Note: This payment window expires in 10 minutes.</i>\n\n"
-                f"⚡ <b>Direct UPI Payment Link (Prefilled):</b>\n"
-                f"👉 <a href=\"{upi_uri}\"><b>📱 Click to Pay ₹{pay_amount:.2f} via GPay / PhonePe / Paytm</b></a>\n\n"
-                f"<i>Clicking the link will securely open your installed UPI app. The payment amount of ₹{pay_amount:.2f} and Reference ID <code>{order_id}</code> will be prefilled for your convenience.</i>\n\n"
-                f"Once you have successfully transferred the amount, tap the <b>✅ I Have Paid / Verify Payment</b> button below so our admin team can verify and dispatch your order! 🍕"
+                f"🍕 <b>Order Payment Pending</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"• <b>Order ID:</b> <code>{order_id}</code>\n"
+                f"{breakdown_text}\n"
+                f"👉 <a href=\"{upi_uri}\"><b>📱 Click to Pay via UPI App</b></a>\n\n"
+                f"<i>After transferring the amount, tap the <b>✅ I Have Paid</b> button below for verification.</i>"
             )
             base_domain = get_mini_app_url(db).rstrip('/')
             pay_link = f"{base_domain}/api/pay_upi/{order_id}"
