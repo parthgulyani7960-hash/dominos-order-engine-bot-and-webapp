@@ -311,20 +311,19 @@ def generate_upi_qr_details(upi_id: str, upi_name: str, amount: float, ref_id: s
     qr.add_data(upi_uri)
     qr.make(fit=True)
     
-    # Use Domino's Blue for QR code color
-    img = qr.make_image(fill_color="#0055A5", back_color="white").convert('RGBA')
+    from qrcode.image.styledpil import StyledPilImage
+    from qrcode.image.styles.moduledrawers.pil import RoundedModuleDrawer
+    from qrcode.image.styles.colormasks import SolidFillColorMask
     
     logo_path = os.path.join(os.path.dirname(__file__), 'static', 'logo.png')
-    if os.path.exists(logo_path):
-        logo = Image.open(logo_path).convert("RGBA")
-        qr_width, qr_height = img.size
-        # Make logo 25% of QR code width
-        logo_size = int(qr_width * 0.25)
-        logo = logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
-        
-        # Paste logo using alpha channel as mask in the exact center
-        pos = ((qr_width - logo_size) // 2, (qr_height - logo_size) // 2)
-        img.paste(logo, pos, logo)
+    
+    # Generate high-res Domino's themed QR code with rounded modules
+    img = qr.make_image(
+        image_factory=StyledPilImage,
+        module_drawer=RoundedModuleDrawer(),
+        color_mask=SolidFillColorMask(front_color=(0, 85, 165)),  # Domino's Blue
+        embeded_image_path=logo_path if os.path.exists(logo_path) else None
+    ).convert('RGBA')
     
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
