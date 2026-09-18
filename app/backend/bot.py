@@ -1705,9 +1705,19 @@ def resolve_cart_item(db: Session, key: str):
                             size = itm.get("size", "")
                             qty = itm.get("qty") or itm.get("quantity") or 1
                             sz_str = f" ({size})" if size else ""
-                            items_list.append(f"{qty}x {name}{sz_str}")
+                            items_list.append(f"{qty}x {escape_html(name)}{sz_str}")
+                    elif isinstance(p_items, dict):
+                        name = p_items.get("name") or p_items.get("category") or "Item"
+                        size = p_items.get("size", "")
+                        qty = p_items.get("qty") or p_items.get("quantity") or 1
+                        sz_str = f" ({size})" if size else ""
+                        items_list.append(f"{qty}x {escape_html(name)}{sz_str}")
                 except Exception:
-                    pass
+                    # Fallback to parsing plain text comma-separated or newline-separated lists
+                    for line in offer.items_json.replace(',', '\n').split('\n'):
+                        clean_line = line.strip()
+                        if clean_line:
+                            items_list.append(escape_html(clean_line))
             return ("offer", offer, offer.title, float(offer.discounted_price), items_list)
 
     # Fallback to product
@@ -4759,18 +4769,30 @@ async def handle_bot_message(db: Session, telegram_id: str, first_name: str, las
                 # Parse item details from items_json if available
                 items_breakdown = ""
                 if off.items_json:
+                    items_list = []
                     try:
                         p_items = json.loads(off.items_json)
                         if isinstance(p_items, list) and len(p_items) > 0:
-                            items_breakdown = "  <b>Included Items:</b>\n"
                             for itm in p_items:
                                 name = itm.get("name") or itm.get("category") or "Item"
                                 size = itm.get("size", "")
                                 qty = itm.get("qty") or itm.get("quantity") or 1
                                 sz_str = f" ({size})" if size else ""
-                                items_breakdown += f"  • {qty}x <b>{escape_html(name)}</b>{sz_str}\n"
+                                items_list.append(f"  • {qty}x <b>{escape_html(name)}</b>{sz_str}\n")
+                        elif isinstance(p_items, dict):
+                            name = p_items.get("name") or p_items.get("category") or "Item"
+                            size = p_items.get("size", "")
+                            qty = p_items.get("qty") or p_items.get("quantity") or 1
+                            sz_str = f" ({size})" if size else ""
+                            items_list.append(f"  • {qty}x <b>{escape_html(name)}</b>{sz_str}\n")
                     except Exception:
-                        pass
+                        for line in off.items_json.replace(',', '\n').split('\n'):
+                            clean_line = line.strip()
+                            if clean_line:
+                                items_list.append(f"  • <b>{escape_html(clean_line)}</b>\n")
+                    
+                    if items_list:
+                        items_breakdown = "  <b>Included Items:</b>\n" + "".join(items_list)
                         
                 savings_str = ""
                 if off.original_price and off.original_price > off.discounted_price:
